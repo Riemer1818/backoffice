@@ -7,6 +7,7 @@ import { reportingRouter } from './routers/reportingRouter';
 import { timeEntriesRouter } from './routers/timeEntriesRouter';
 import { contactRouter } from './routers/contactRouter';
 import { contactAssociationRouter } from './routers/contactAssociationRouter';
+import { invoiceIngestionRouter } from './routers/invoiceIngestionRouter';
 
 export const appRouter = router({
   company: companyRouter,
@@ -17,6 +18,7 @@ export const appRouter = router({
   timeEntries: timeEntriesRouter,
   contact: contactRouter,
   contactAssociation: contactAssociationRouter,
+  invoiceIngestion: invoiceIngestionRouter,
 });
 
 export type AppRouter = typeof appRouter;
