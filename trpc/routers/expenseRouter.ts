@@ -449,6 +449,152 @@ const expenseRouter = router({
       return result.rows[0];
     }),
 
+  // Create manual invoice
+  createManual: publicProcedure
+    .input(z.object({
+      supplier_name: z.string(),
+      description: z.string().optional(),
+      invoice_date: z.string(),
+      subtotal: z.number(),
+      tax_amount: z.number(),
+      total_amount: z.number(),
+      project_id: z.number().nullable().optional(),
+      currency: z.string().length(3),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const converter = new CurrencyConverter();
+      const currency = input.currency.toUpperCase();
+
+      let eurTotal = input.total_amount;
+      let eurSubtotal = input.subtotal;
+      let eurVat = input.tax_amount;
+      let exchangeRate = 1.0;
+      let exchangeRateDate: Date | null = null;
+
+      // Convert to EUR if needed
+      if (currency !== 'EUR') {
+        const conversion = await converter.convert(
+          input.total_amount,
+          currency,
+          'EUR',
+          input.invoice_date
+        );
+
+        exchangeRate = conversion.rate;
+        exchangeRateDate = new Date(conversion.date);
+
+        const ratio = conversion.convertedAmount / input.total_amount;
+        eurTotal = conversion.convertedAmount;
+        eurSubtotal = input.subtotal * ratio;
+        eurVat = input.tax_amount * ratio;
+      }
+
+      const result = await ctx.db.query(
+        `INSERT INTO incoming_invoices (
+          supplier_name, description, invoice_date,
+          subtotal, tax_amount, total_amount,
+          original_currency, original_amount, original_subtotal, original_tax_amount,
+          exchange_rate, exchange_rate_date,
+          project_id, review_status, payment_status, source
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        RETURNING *`,
+        [
+          input.supplier_name,
+          input.description || '',
+          input.invoice_date,
+          eurSubtotal,
+          eurVat,
+          eurTotal,
+          currency,
+          currency !== 'EUR' ? input.total_amount : null,
+          currency !== 'EUR' ? input.subtotal : null,
+          currency !== 'EUR' ? input.tax_amount : null,
+          exchangeRate,
+          exchangeRateDate,
+          input.project_id || null,
+          'pending',
+          'unpaid',
+          'manual'
+        ]
+      );
+
+      return result.rows[0];
+    }),
+
+  // Extract invoice data from PDF
+  extractPdf: publicProcedure
+    .input(z.object({
+      pdfBase64: z.string(),
+      filename: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { DocumentParser } = await import('../../core/parsers/DocumentParser');
+      const { LLMService } = await import('../../core/llm/LLMService');
+
+      const pdfBuffer = Buffer.from(input.pdfBase64.split(',')[1] || input.pdfBase64, 'base64');
+      const parser = new DocumentParser();
+      const llm = new LLMService();
+
+      // Parse PDF to text
+      const parsed = await parser.parse(pdfBuffer, 'application/pdf');
+
+      if (!parsed.text.trim()) {
+        throw new Error('Could not extract text from PDF');
+      }
+
+      // Step 1: Detect currency and language
+      const currencySchema = `{
+  "currency": "string (3-letter ISO code: USD, EUR, GBP, SGD, JPY, CHF, CAD, AUD, etc.)",
+  "language": "string (2-letter ISO code: en, nl, fr, de, es, etc.)"
+}`;
+
+      const currencyPrompt = `Look at this invoice PDF. What currency and language is it in?
+
+INSTRUCTIONS:
+- Look for currency SYMBOLS: $, £, €, ¥, S$, C$, A$
+- Look for currency CODES: USD, EUR, GBP, SGD, JPY, CHF, CAD, AUD
+- If you see "$" determine if it's USD, SGD, CAD, or AUD from context
+- For language, detect from the text content
+
+${parsed.text}`;
+
+      const currencyInfo = await llm.extractStructured<{ currency: string; language: string }>(
+        currencyPrompt,
+        currencySchema,
+        { metadata: { app: 'manual-invoice-currency' } }
+      );
+
+      // Step 2: Extract full invoice data
+      const invoiceSchema = `{
+  "vendor": "string (company/supplier name)",
+  "date": "string (YYYY-MM-DD format)",
+  "amount": "number (total amount including VAT)",
+  "vatAmount": "number (VAT amount if specified)",
+  "description": "string (brief description)",
+  "invoiceNumber": "string (invoice/reference number if present)"
+}`;
+
+      const invoiceData = await llm.extractStructured<{
+        vendor: string;
+        date: string;
+        amount: number;
+        vatAmount?: number;
+        description: string;
+        invoiceNumber?: string;
+      }>(parsed.text, invoiceSchema, { metadata: { app: 'manual-invoice-extraction' } });
+
+      return {
+        supplier_name: invoiceData.vendor,
+        description: invoiceData.description,
+        invoice_date: invoiceData.date,
+        subtotal: invoiceData.amount - (invoiceData.vatAmount || 0),
+        tax_amount: invoiceData.vatAmount || 0,
+        total_amount: invoiceData.amount,
+        currency: currencyInfo.currency,
+        language: currencyInfo.language,
+      };
+    }),
+
   // Delete expense
   delete: publicProcedure
     .input(z.object({ id: z.number() }))
