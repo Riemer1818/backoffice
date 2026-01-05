@@ -2,7 +2,7 @@ import { BaseEntity } from './BaseEntity';
 import { ContactSchema, ContactType } from './schemas/Contact';
 
 /**
- * Contact entity - people within companies
+ * Contact entity - people, optionally within companies
  */
 export class Contact extends BaseEntity<ContactType> {
   constructor(data: ContactType) {
@@ -11,7 +11,7 @@ export class Contact extends BaseEntity<ContactType> {
   }
 
   // Getters
-  get companyId(): number {
+  get companyId(): number | undefined {
     return this.data.company_id;
   }
 
@@ -19,12 +19,16 @@ export class Contact extends BaseEntity<ContactType> {
     return this.data.first_name;
   }
 
-  get lastName(): string {
+  get lastName(): string | undefined {
     return this.data.last_name;
   }
 
   get role(): string | undefined {
     return this.data.role;
+  }
+
+  get description(): string | undefined {
+    return this.data.description;
   }
 
   get email(): string | undefined {
@@ -49,7 +53,9 @@ export class Contact extends BaseEntity<ContactType> {
 
   // Display helpers
   getFullName(): string {
-    return `${this.data.first_name} ${this.data.last_name}`;
+    return this.data.last_name
+      ? `${this.data.first_name} ${this.data.last_name}`
+      : this.data.first_name;
   }
 
   getDisplayName(): string {
@@ -67,6 +73,7 @@ export class Contact extends BaseEntity<ContactType> {
       first_name: this.data.first_name,
       last_name: this.data.last_name,
       role: this.data.role,
+      description: this.data.description,
       email: this.data.email,
       phone: this.data.phone,
       is_primary: this.data.is_primary,
@@ -78,10 +85,11 @@ export class Contact extends BaseEntity<ContactType> {
   static fromDatabase(row: any): Contact {
     return new Contact({
       id: row.id,
-      company_id: row.company_id,
+      company_id: row.company_id || undefined,
       first_name: row.first_name,
       last_name: row.last_name,
       role: row.role || undefined,
+      description: row.description || undefined,
       email: row.email || undefined,
       phone: row.phone || undefined,
       is_primary: row.is_primary ?? false,

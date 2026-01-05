@@ -90,10 +90,11 @@ const contactRouter = router({
   // Create contact
   create: publicProcedure
     .input(z.object({
-      company_id: z.number().int().positive(),
+      company_id: z.number().int().positive().optional(),
       first_name: z.string().min(1).max(100),
-      last_name: z.string().min(1).max(100),
+      last_name: z.string().max(100).optional(),
       role: z.string().max(100).optional(),
+      description: z.string().max(500).optional(),
       email: z.string().email().optional().or(z.literal('')),
       phone: z.string().max(50).optional(),
       is_primary: z.boolean().default(false),
@@ -105,7 +106,7 @@ const contactRouter = router({
       const created = await ctx.repos.contact.create(contact);
 
       // If this is set as primary, update the company
-      if (input.is_primary) {
+      if (input.is_primary && input.company_id) {
         await ctx.repos.contact.setPrimary(created.id);
       }
 
@@ -119,8 +120,9 @@ const contactRouter = router({
       data: z.object({
         company_id: z.number().int().positive().optional(),
         first_name: z.string().min(1).max(100).optional(),
-        last_name: z.string().min(1).max(100).optional(),
+        last_name: z.string().max(100).optional(),
         role: z.string().max(100).optional(),
+        description: z.string().max(500).optional(),
         email: z.string().email().optional().or(z.literal('')),
         phone: z.string().max(50).optional(),
         is_primary: z.boolean().optional(),

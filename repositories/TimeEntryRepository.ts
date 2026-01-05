@@ -76,6 +76,7 @@ export class TimeEntryRepository extends BaseRepository<TimeEntry> {
       SELECT
         te.*,
         p.name as project_name,
+        p.color as project_color,
         p.client_id,
         c.name as client_name
       FROM time_entries te

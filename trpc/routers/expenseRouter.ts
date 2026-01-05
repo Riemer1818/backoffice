@@ -41,7 +41,15 @@ const expenseRouter = router({
         throw new Error('Expense not found');
       }
 
-      return result.rows[0];
+      const expense = result.rows[0];
+
+      // Convert PDF bytea to base64 if it exists
+      if (expense.invoice_file) {
+        expense.invoice_file_base64 = expense.invoice_file.toString('base64');
+        delete expense.invoice_file; // Remove binary data
+      }
+
+      return expense;
     }),
 
   // Get pending for review
@@ -126,6 +134,26 @@ const expenseRouter = router({
     .mutation(async ({ ctx, input }) => {
       await ctx.db.query('DELETE FROM incoming_invoices WHERE id = $1', [input.id]);
       return { success: true };
+    }),
+
+  // Upload PDF
+  uploadPdf: publicProcedure
+    .input(z.object({
+      id: z.number(),
+      pdfBase64: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const pdfBuffer = Buffer.from(input.pdfBase64, 'base64');
+
+      const result = await ctx.db.query(
+        `UPDATE incoming_invoices
+         SET invoice_file = $1, updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [pdfBuffer, input.id]
+      );
+
+      return result.rows[0];
     }),
 });
 

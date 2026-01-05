@@ -69,6 +69,7 @@ const projectRouter = router({
       start_date: z.string().optional(),
       end_date: z.string().optional(),
       currency: z.string().default('EUR'),
+      color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default('#1e3a8a'),
     }))
     .mutation(async ({ ctx, input }) => {
       const project = new Project({ ...input, id: 0 });
@@ -89,6 +90,7 @@ const projectRouter = router({
         start_date: z.string().optional(),
         end_date: z.string().optional(),
         currency: z.string().optional(),
+        color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
       }),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -100,10 +102,12 @@ const projectRouter = router({
       const updated = new Project({
         ...existing.data,
         ...input.data,
+        start_date: input.data.start_date ? new Date(input.data.start_date) : existing.data.start_date,
+        end_date: input.data.end_date ? new Date(input.data.end_date) : existing.data.end_date,
         id: input.id,
       });
 
-      return await ctx.repos.project.update(updated);
+      return await ctx.repos.project.update(input.id, updated);
     }),
 
   // Delete project

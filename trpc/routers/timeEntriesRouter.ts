@@ -7,6 +7,7 @@ const timeEntriesRouter = router({
   getAll: publicProcedure
     .input(z.object({
       projectId: z.number().optional(),
+      contactId: z.number().optional(),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
       isInvoiced: z.boolean().optional(),
@@ -31,6 +32,11 @@ const timeEntriesRouter = router({
       // Filter by project if provided
       if (input?.projectId) {
         filtered = filtered.filter(e => e.data.project_id === input.projectId);
+      }
+
+      // Filter by contact if provided
+      if (input?.contactId) {
+        filtered = filtered.filter(e => e.data.contact_id === input.contactId);
       }
 
       // Filter by invoiced status if provided
@@ -73,7 +79,26 @@ const timeEntriesRouter = router({
     .query(async ({ ctx, input }) => {
       const startDate = new Date(input.startDate);
       const endDate = new Date(input.endDate);
-      return await ctx.repos.timeEntry.findAllWithProjectInfo(startDate, endDate);
+      const entries = await ctx.repos.timeEntry.findAllWithProjectInfo(startDate, endDate);
+
+      // Fetch contacts for each time entry
+      const entriesWithContacts = await Promise.all(
+        entries.map(async (entry: any) => {
+          const contactsResult = await ctx.db.query(
+            `SELECT c.id, c.first_name, c.last_name
+             FROM time_entry_contacts tec
+             JOIN contacts c ON c.id = tec.contact_id
+             WHERE tec.time_entry_id = $1`,
+            [entry.id]
+          );
+          return {
+            ...entry,
+            contacts: contactsResult.rows,
+          };
+        })
+      );
+
+      return entriesWithContacts;
     }),
 
   // Get uninvoiced time entries
@@ -108,6 +133,7 @@ const timeEntriesRouter = router({
     .input(z.object({
       project_id: z.number(),
       contact_id: z.number().optional(),
+      contact_ids: z.array(z.number()).optional(),
       date: z.string(),
       start_time: z.string().optional(),
       end_time: z.string().optional(),
@@ -118,14 +144,27 @@ const timeEntriesRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      const { contact_ids, ...entryData } = input;
       const entry = new TimeEntry({
-        ...input,
+        ...entryData,
         date: new Date(input.date),
         start_time: input.start_time ? new Date(input.start_time) : undefined,
         end_time: input.end_time ? new Date(input.end_time) : undefined,
         is_invoiced: false,
       });
-      return await ctx.repos.timeEntry.create(entry);
+      const created = await ctx.repos.timeEntry.create(entry);
+
+      // Add contacts to junction table
+      if (contact_ids && contact_ids.length > 0) {
+        for (const contactId of contact_ids) {
+          await ctx.db.query(
+            'INSERT INTO time_entry_contacts (time_entry_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [created.data.id, contactId]
+          );
+        }
+      }
+
+      return created;
     }),
 
   // Update time entry
@@ -135,6 +174,7 @@ const timeEntriesRouter = router({
       data: z.object({
         project_id: z.number().optional(),
         contact_id: z.number().optional(),
+        contact_ids: z.array(z.number()).optional(),
         date: z.string().optional(),
         start_time: z.string().optional(),
         end_time: z.string().optional(),
@@ -156,16 +196,36 @@ const timeEntriesRouter = router({
         throw new Error('Cannot update invoiced time entry');
       }
 
+      const { contact_ids, ...updateData } = input.data;
+
       const updated = new TimeEntry({
         ...existing.data,
-        ...input.data,
-        date: input.data.date ? new Date(input.data.date) : existing.data.date,
-        start_time: input.data.start_time ? new Date(input.data.start_time) : existing.data.start_time,
-        end_time: input.data.end_time ? new Date(input.data.end_time) : existing.data.end_time,
+        ...updateData,
+        date: updateData.date ? new Date(updateData.date) : existing.data.date,
+        start_time: updateData.start_time ? new Date(updateData.start_time) : existing.data.start_time,
+        end_time: updateData.end_time ? new Date(updateData.end_time) : existing.data.end_time,
         id: input.id,
       });
 
-      return await ctx.repos.timeEntry.update(input.id, updated);
+      const result = await ctx.repos.timeEntry.update(input.id, updated);
+
+      // Update contacts in junction table if provided
+      if (contact_ids !== undefined) {
+        // Remove existing contacts
+        await ctx.db.query('DELETE FROM time_entry_contacts WHERE time_entry_id = $1', [input.id]);
+
+        // Add new contacts
+        if (contact_ids.length > 0) {
+          for (const contactId of contact_ids) {
+            await ctx.db.query(
+              'INSERT INTO time_entry_contacts (time_entry_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+              [input.id, contactId]
+            );
+          }
+        }
+      }
+
+      return result;
     }),
 
   // Delete time entry

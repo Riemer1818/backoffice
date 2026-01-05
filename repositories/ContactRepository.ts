@@ -61,7 +61,7 @@ export class ContactRepository extends BaseRepository<Contact> {
   }
 
   /**
-   * Get contacts with company info
+   * Get contacts with company info (including those without companies)
    */
   async findAllWithCompany(): Promise<any[]> {
     const result = await this.pool.query(`
@@ -70,7 +70,7 @@ export class ContactRepository extends BaseRepository<Contact> {
         co.name as company_name,
         co.type as company_type
       FROM contacts c
-      JOIN companies co ON c.company_id = co.id
+      LEFT JOIN companies co ON c.company_id = co.id
       ORDER BY c.created_at DESC
     `);
     return result.rows;

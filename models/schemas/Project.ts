@@ -24,6 +24,9 @@ export const ProjectSchema = BaseEntitySchema.extend({
   // Timeline
   start_date: z.date().optional(),
   end_date: z.date().optional(),
+
+  // Appearance
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default('#1e3a8a'),
 });
 
 export type ProjectType = z.infer<typeof ProjectSchema>;

@@ -89,6 +89,7 @@ export class Project extends BaseEntity<ProjectType> {
       status: this.data.status,
       start_date: this.data.start_date,
       end_date: this.data.end_date,
+      color: this.data.color,
     };
   }
 
@@ -104,6 +105,7 @@ export class Project extends BaseEntity<ProjectType> {
       status: row.status || 'active',
       start_date: row.start_date ? new Date(row.start_date) : undefined,
       end_date: row.end_date ? new Date(row.end_date) : undefined,
+      color: row.color || '#1e3a8a',
       created_at: row.created_at ? new Date(row.created_at) : undefined,
       updated_at: row.updated_at ? new Date(row.updated_at) : undefined,
     });

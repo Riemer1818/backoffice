@@ -7,6 +7,7 @@ const invoiceRouter = router({
     .input(z.object({
       status: z.enum(['draft', 'sent', 'paid', 'overdue', 'cancelled']).optional(),
       clientId: z.number().optional(),
+      projectId: z.number().optional(),
     }).optional())
     .query(async ({ ctx, input }) => {
       let query = 'SELECT * FROM invoices WHERE 1=1';
@@ -20,6 +21,11 @@ const invoiceRouter = router({
       if (input?.clientId) {
         params.push(input.clientId);
         query += ` AND client_id = $${params.length}`;
+      }
+
+      if (input?.projectId) {
+        params.push(input.projectId);
+        query += ` AND project_id = $${params.length}`;
       }
 
       query += ' ORDER BY invoice_date DESC';

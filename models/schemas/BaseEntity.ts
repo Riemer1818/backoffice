@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Base schema for all entities with timestamps
  */
 export const BaseEntitySchema = z.object({
-  id: z.number().int().positive().optional(),
+  id: z.number().int().nonnegative().optional(),
   created_at: z.date().optional(),
   updated_at: z.date().optional(),
 });
