@@ -1,0 +1,49 @@
+{
+  "name": "boekhouding-dashboard",
+  "version": "1.0.0",
+  "description": "Business accounting dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "dev:trpc": "ts-node-dev --respawn --transpile-only server-trpc.ts",
+    "build": "tsc",
+    "dev:ts": "ts-node-dev --respawn --transpile-only server.ts",
+    "type-check": "tsc --noEmit",
+    "validate-models": "ts-node -e \"console.log('Models validated successfully')\"",
+    "migrate": "node-pg-migrate up",
+    "migrate:down": "node-pg-migrate down",
+    "migrate:create": "node-pg-migrate create"
+  },
+  "dependencies": {
+    "@langchain/google-genai": "^2.0.4",
+    "@tanstack/react-query": "^5.90.16",
+    "@trpc/server": "^11.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "ejs": "^3.1.9",
+    "express": "^4.18.2",
+    "googleapis": "^144.0.0",
+    "imap": "^0.8.19",
+    "langchain": "^1.1.5",
+    "langfuse": "^3.30.0",
+    "mailparser": "^3.9.1",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.11.3",
+    "superjson": "^2.2.6",
+    "zod": "^4.3.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/imap": "^0.8.43",
+    "@types/node": "^25.0.3",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/pg": "^8.16.0",
+    "node-pg-migrate": "^7.9.0",
+    "nodemon": "^3.0.2",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  }
+}
