@@ -54,7 +54,19 @@ const projectRouter = router({
         throw new Error('Project not found');
       }
 
-      return result.rows[0];
+      const project = result.rows[0];
+
+      // Get total spending for this project
+      const spendingResult = await ctx.db.query(
+        `SELECT COALESCE(SUM(total_amount), 0) as total
+         FROM incoming_invoices
+         WHERE project_id = $1 AND review_status = 'approved'`,
+        [input.id]
+      );
+
+      project.total_spent = parseFloat(spendingResult.rows[0]?.total || '0');
+
+      return project;
     }),
 
   // Create project
@@ -116,6 +128,30 @@ const projectRouter = router({
     .mutation(async ({ ctx, input }) => {
       await ctx.repos.project.delete(input.id);
       return { success: true };
+    }),
+
+  // Get monthly expenses for a project
+  getMonthlyExpenses: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const result = await ctx.db.query(
+        `SELECT
+          TO_CHAR(invoice_date, 'YYYY-MM') as month,
+          COUNT(*) as invoice_count,
+          SUM(total_amount) as total_spent
+         FROM incoming_invoices
+         WHERE project_id = $1 AND review_status = 'approved'
+         GROUP BY TO_CHAR(invoice_date, 'YYYY-MM')
+         ORDER BY month DESC
+         LIMIT 12`,
+        [input.id]
+      );
+
+      return result.rows.map(row => ({
+        month: row.month,
+        invoice_count: parseInt(row.invoice_count),
+        total_spent: parseFloat(row.total_spent),
+      }));
     }),
 });
 

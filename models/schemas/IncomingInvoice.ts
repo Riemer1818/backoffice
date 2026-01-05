@@ -37,6 +37,12 @@ export const IncomingInvoiceSchema = BaseEntitySchema.extend({
   currency: z.string().length(3).default('EUR'),
   tax_rate_id: z.number().int().positive().optional(),
 
+  // Currency conversion
+  original_currency: z.string().length(3).default('EUR'),
+  original_amount: z.number().min(0).optional(),
+  exchange_rate: z.number().positive().default(1.0),
+  exchange_rate_date: z.date().optional(),
+
   // Category
   category_id: z.number().int().positive().optional(),
 

@@ -5,7 +5,7 @@ import cron from 'node-cron';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { appRouter } from './trpc/router';
 import { createContext } from './trpc/context';
-import { InvoiceIngestionApp } from './apps/invoice-ingestion/InvoiceIngestionApp';
+// import { InvoiceIngestionApp } from './apps/invoice-ingestion/InvoiceIngestionApp';
 import { Pool } from 'pg';
 
 const app = express();
@@ -41,19 +41,20 @@ app.listen(PORT, () => {
   console.log(`📡 tRPC endpoint: http://localhost:${PORT}/trpc`);
   console.log(`💚 Health check: http://localhost:${PORT}/health`);
 
+  // TODO: Re-enable invoice ingestion once ExpenseRepository is properly set up
   // Start automated invoice ingestion (every 30 minutes)
-  console.log('📧 Starting automated invoice ingestion scheduler (every 30 minutes)...');
+  // console.log('📧 Starting automated invoice ingestion scheduler (every 30 minutes)...');
 
-  cron.schedule('*/30 * * * *', async () => {
-    console.log('\n⏰ [Scheduled] Running invoice ingestion...');
-    try {
-      const ingestionApp = new InvoiceIngestionApp(dbPool);
-      await ingestionApp.processInvoices();
-      console.log('✅ [Scheduled] Invoice ingestion completed\n');
-    } catch (error) {
-      console.error('❌ [Scheduled] Invoice ingestion failed:', error);
-    }
-  });
+  // cron.schedule('*/30 * * * *', async () => {
+  //   console.log('\n⏰ [Scheduled] Running invoice ingestion...');
+  //   try {
+  //     const ingestionApp = new InvoiceIngestionApp(dbPool);
+  //     await ingestionApp.processInvoices();
+  //     console.log('✅ [Scheduled] Invoice ingestion completed\n');
+  //   } catch (error) {
+  //     console.error('❌ [Scheduled] Invoice ingestion failed:', error);
+  //   }
+  // });
 
-  console.log('✅ Automated invoice ingestion scheduler started');
+  // console.log('✅ Automated invoice ingestion scheduler started');
 });

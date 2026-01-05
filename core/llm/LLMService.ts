@@ -75,15 +75,27 @@ export class LLMService {
   }
 
   /**
-   * Extract structured data from text using LLM
+   * Extract structured data from text using LLM with retries
    */
   async extractStructured<T>(
     text: string,
     schema: string,
     options: Omit<LLMCallOptions, 'traceName'> = {}
   ): Promise<T> {
-    const prompt = `Extract structured data from the following text according to the schema.
-Return ONLY valid JSON, no markdown, no explanation.
+    const maxRetries = 3;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      let cleaned = '';
+      try {
+        const prompt = `Extract structured data from the following text according to the schema.
+
+CRITICAL INSTRUCTIONS:
+1. Return ONLY valid JSON. No markdown code blocks, no explanations, no extra text.
+2. The response must start with { and end with }. Use double quotes for all strings.
+3. For currency field: Look very carefully for currency symbols ($, £, €, ¥, S$) or codes (USD, GBP, EUR, SGD, JPY) in the document.
+4. DO NOT assume EUR - only use EUR if you see € or "EUR" explicitly in the invoice.
+5. Pay attention to context: vendor location, currency symbol placement, and currency codes.
 
 Schema:
 ${schema}
@@ -91,17 +103,43 @@ ${schema}
 Text:
 ${text}
 
-JSON Output:`;
+Return valid JSON now:`;
 
-    const response = await this.call(prompt, {
-      ...options,
-      traceName: 'extract-structured',
-      temperature: 0.1,
-    });
+        const response = await this.call(prompt, {
+          ...options,
+          traceName: 'extract-structured',
+          temperature: 0.1,
+        });
 
-    // Clean response (remove markdown code blocks if present)
-    const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    return JSON.parse(cleaned);
+        // Clean response (remove markdown code blocks if present)
+        cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+        // Try to extract JSON if response contains extra text
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          cleaned = jsonMatch[0];
+        }
+
+        return JSON.parse(cleaned);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error('Unknown error');
+        console.error(`Attempt ${attempt}/${maxRetries} failed:`, lastError.message);
+
+        // Log raw response for debugging (only first 300 chars to avoid spam)
+        if (cleaned && attempt === 1) {
+          console.error('Problematic response:', cleaned.substring(0, 300));
+        }
+
+        if (attempt === maxRetries) {
+          console.error('All retries exhausted. Last response was invalid JSON.');
+        } else {
+          console.log(`Retrying in ${attempt}s...`);
+          await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+        }
+      }
+    }
+
+    throw new Error(`Failed to extract structured data after ${maxRetries} attempts: ${lastError?.message}`);
   }
 
   /**

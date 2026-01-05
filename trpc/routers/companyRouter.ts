@@ -40,7 +40,23 @@ const companyRouter = router({
       if (!company) {
         throw new Error('Company not found');
       }
-      return company.data;
+
+      // Get total spending if this is a supplier
+      let totalSpent = 0;
+      if (company.data.type === 'supplier' || company.data.type === 'both') {
+        const spendingResult = await ctx.db.query(
+          `SELECT COALESCE(SUM(total_amount), 0) as total
+           FROM incoming_invoices
+           WHERE supplier_id = $1 AND review_status = 'approved'`,
+          [input.id]
+        );
+        totalSpent = parseFloat(spendingResult.rows[0]?.total || '0');
+      }
+
+      return {
+        ...company.data,
+        total_spent: totalSpent,
+      };
     }),
 
   // Create company

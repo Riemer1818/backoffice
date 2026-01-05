@@ -231,6 +231,7 @@ export class ImapEmailService extends EventEmitter {
    * Mark email as read by UID
    */
   async markAsRead(uid: string): Promise<void> {
+    console.log(`📧 Marking email UID ${uid} as read...`);
     const imap = await this.connect();
     await this.openBox();
 
@@ -240,10 +241,17 @@ export class ImapEmailService extends EventEmitter {
         return;
       }
 
-      this.imap.addFlags(uid, ['\\Seen'], (err) => {
-        this.disconnect();
-        if (err) reject(err);
-        else resolve();
+      // addFlags expects UID or array of UIDs
+      this.imap.addFlags([uid], ['\\Seen'], (err) => {
+        if (err) {
+          console.error(`❌ Failed to mark UID ${uid} as read:`, err);
+          this.disconnect();
+          reject(err);
+        } else {
+          console.log(`✅ Successfully marked UID ${uid} as read`);
+          this.disconnect();
+          resolve();
+        }
       });
     });
   }
