@@ -144,7 +144,7 @@ const taxRouter = router({
           ty.year,
           ty.is_active
         FROM tax_years ty
-        ORDER BY ty.year DESC
+        ORDER BY ty.year ASC
       `);
 
       const configs = await Promise.all(yearsResult.rows.map(async (yearRow) => {
