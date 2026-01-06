@@ -133,6 +133,135 @@ const taxRouter = router({
 
       return { success: true, payment: result.rows[0] };
     }),
+
+  // Get all tax configurations (years with brackets and benefits)
+  getAllTaxConfigurations: publicProcedure
+    .query(async ({ ctx }) => {
+      // Get all years with their brackets, benefits, and user settings
+      const yearsResult = await ctx.db.query(`
+        SELECT
+          ty.id as year_id,
+          ty.year,
+          ty.is_active
+        FROM tax_years ty
+        ORDER BY ty.year DESC
+      `);
+
+      const configs = await Promise.all(yearsResult.rows.map(async (yearRow) => {
+        // Get brackets for this year
+        const bracketsResult = await ctx.db.query(`
+          SELECT *
+          FROM income_tax_brackets
+          WHERE tax_year_id = $1
+          ORDER BY bracket_order
+        `, [yearRow.year_id]);
+
+        // Get benefits for this year
+        const benefitsResult = await ctx.db.query(`
+          SELECT *
+          FROM tax_benefits
+          WHERE tax_year_id = $1
+          ORDER BY benefit_type
+        `, [yearRow.year_id]);
+
+        // Get user settings for this year
+        const settingsResult = await ctx.db.query(`
+          SELECT *
+          FROM user_tax_settings
+          WHERE tax_year_id = $1
+        `, [yearRow.year_id]);
+
+        return {
+          year: {
+            id: yearRow.year_id,
+            year: yearRow.year,
+            is_active: yearRow.is_active,
+          },
+          brackets: bracketsResult.rows.map(b => ({
+            id: b.id,
+            bracket_order: b.bracket_order,
+            income_from: parseFloat(b.income_from),
+            income_to: b.income_to ? parseFloat(b.income_to) : null,
+            rate: parseFloat(b.rate),
+          })),
+          benefits: benefitsResult.rows.map(b => ({
+            id: b.id,
+            benefit_type: b.benefit_type,
+            name: b.name,
+            amount: b.amount ? parseFloat(b.amount) : null,
+            percentage: b.percentage ? parseFloat(b.percentage) : null,
+            description: b.description,
+            is_active: b.is_active,
+            requires_hours_criterion: b.requires_hours_criterion,
+            max_usage_count: b.max_usage_count,
+          })),
+          userSettings: settingsResult.rows.length > 0 ? {
+            id: settingsResult.rows[0].id,
+            applies_zelfstandigenaftrek: settingsResult.rows[0].applies_zelfstandigenaftrek,
+            applies_startersaftrek: settingsResult.rows[0].applies_startersaftrek,
+            applies_mkb_winstvrijstelling: settingsResult.rows[0].applies_mkb_winstvrijstelling,
+            meets_hours_criterion: settingsResult.rows[0].meets_hours_criterion,
+            starter_years_used: settingsResult.rows[0].starter_years_used,
+            notes: settingsResult.rows[0].notes,
+          } : null,
+        };
+      }));
+
+      return configs;
+    }),
+
+  // Update user tax settings for a specific year
+  updateUserTaxSettings: publicProcedure
+    .input(z.object({
+      year: z.number(),
+      applies_zelfstandigenaftrek: z.boolean(),
+      applies_startersaftrek: z.boolean(),
+      applies_mkb_winstvrijstelling: z.boolean(),
+      meets_hours_criterion: z.boolean().optional(),
+      starter_years_used: z.number().optional(),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // First get the tax_year_id
+      const yearResult = await ctx.db.query(
+        'SELECT id FROM tax_years WHERE year = $1',
+        [input.year]
+      );
+
+      if (yearResult.rows.length === 0) {
+        throw new Error(`Tax year ${input.year} not found`);
+      }
+
+      const taxYearId = yearResult.rows[0].id;
+
+      // Upsert user settings
+      const result = await ctx.db.query(
+        `INSERT INTO user_tax_settings
+          (tax_year_id, applies_zelfstandigenaftrek, applies_startersaftrek, applies_mkb_winstvrijstelling, meets_hours_criterion, starter_years_used, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (tax_year_id)
+         DO UPDATE SET
+           applies_zelfstandigenaftrek = EXCLUDED.applies_zelfstandigenaftrek,
+           applies_startersaftrek = EXCLUDED.applies_startersaftrek,
+           applies_mkb_winstvrijstelling = EXCLUDED.applies_mkb_winstvrijstelling,
+           meets_hours_criterion = EXCLUDED.meets_hours_criterion,
+           starter_years_used = EXCLUDED.starter_years_used,
+           notes = EXCLUDED.notes,
+           updated_at = NOW()
+         RETURNING *`,
+        [
+          taxYearId,
+          input.applies_zelfstandigenaftrek,
+          input.applies_startersaftrek,
+          input.applies_mkb_winstvrijstelling,
+          input.meets_hours_criterion ?? true,
+          input.starter_years_used ?? 0,
+          input.notes || null
+        ]
+      );
+
+      return { success: true, settings: result.rows[0] };
+    }),
 });
 
 export { taxRouter };

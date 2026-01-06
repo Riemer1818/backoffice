@@ -39,7 +39,17 @@ const invoiceRouter = router({
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
       const result = await ctx.db.query(
-        'SELECT * FROM invoices WHERE id = $1',
+        `SELECT
+          i.*,
+          c.name as client_name,
+          c.email as client_email,
+          c.phone as client_phone,
+          p.name as project_name,
+          p.description as project_description
+         FROM invoices i
+         LEFT JOIN companies c ON i.client_id = c.id
+         LEFT JOIN projects p ON i.project_id = p.id
+         WHERE i.id = $1`,
         [input.id]
       );
 
