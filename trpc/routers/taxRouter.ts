@@ -25,11 +25,31 @@ const taxRouter = router({
       }
 
       const row = result.rows[0];
+
+      // Get individual custom benefits for this year
+      const customBenefitsQuery = `
+        SELECT tb.name, tb.amount
+        FROM tax_benefits tb
+        JOIN user_benefit_selections ubs ON ubs.benefit_id = tb.id AND ubs.is_enabled = true
+        JOIN tax_years ty ON ty.id = tb.tax_year_id
+        WHERE ty.year = $1
+          AND tb.benefit_type NOT IN ('zelfstandigenaftrek', 'startersaftrek', 'mkb_winstvrijstelling')
+          AND tb.amount IS NOT NULL
+        ORDER BY tb.name
+      `;
+
+      const customBenefitsResult = await ctx.db.query(customBenefitsQuery, [parseInt(row.year)]);
+
       return {
         year: parseInt(row.year),
         gross_profit: parseFloat(row.gross_profit) || 0,
         self_employed_deduction: parseFloat(row.self_employed_deduction) || 0,
         startup_deduction: parseFloat(row.startup_deduction) || 0,
+        custom_deductions: parseFloat(row.custom_deductions) || 0,
+        custom_benefits: customBenefitsResult.rows.map(b => ({
+          name: b.name,
+          amount: parseFloat(b.amount),
+        })),
         mkb_profit_exemption: parseFloat(row.mkb_profit_exemption) || 0,
         profit_after_deductions: parseFloat(row.profit_after_deductions) || 0,
         mkb_exemption_amount: parseFloat(row.mkb_exemption_amount) || 0,
@@ -39,6 +59,9 @@ const taxRouter = router({
         tax_bracket_1: parseFloat(row.tax_bracket_1) || 0,
         bracket_2_rate: parseFloat(row.bracket_2_rate) || 0,
         tax_bracket_2: parseFloat(row.tax_bracket_2) || 0,
+        total_income_tax_before_credits: parseFloat(row.total_income_tax_before_credits) || 0,
+        algemene_heffingskorting: parseFloat(row.algemene_heffingskorting) || 0,
+        arbeidskorting: parseFloat(row.arbeidskorting) || 0,
         total_income_tax: parseFloat(row.total_income_tax) || 0,
         effective_tax_rate: parseFloat(row.effective_tax_rate) || 0,
         net_profit_after_tax: parseFloat(row.net_profit_after_tax) || 0,
@@ -156,12 +179,15 @@ const taxRouter = router({
           ORDER BY bracket_order
         `, [yearRow.year_id]);
 
-        // Get benefits for this year
+        // Get benefits for this year with their selection status
         const benefitsResult = await ctx.db.query(`
-          SELECT *
-          FROM tax_benefits
-          WHERE tax_year_id = $1
-          ORDER BY benefit_type
+          SELECT
+            tb.*,
+            COALESCE(ubs.is_enabled, false) as is_enabled
+          FROM tax_benefits tb
+          LEFT JOIN user_benefit_selections ubs ON ubs.benefit_id = tb.id
+          WHERE tb.tax_year_id = $1
+          ORDER BY tb.benefit_type
         `, [yearRow.year_id]);
 
         // Get user settings for this year
@@ -192,7 +218,10 @@ const taxRouter = router({
             percentage: b.percentage ? parseFloat(b.percentage) : null,
             description: b.description,
             is_active: b.is_active,
+            is_enabled: b.is_enabled,
             requires_hours_criterion: b.requires_hours_criterion,
+            minimum_hours_required: b.minimum_hours_required,
+            eligibility_criteria: b.eligibility_criteria,
             max_usage_count: b.max_usage_count,
           })),
           userSettings: settingsResult.rows.length > 0 ? {
@@ -261,6 +290,255 @@ const taxRouter = router({
       );
 
       return { success: true, settings: result.rows[0] };
+    }),
+
+  // Create a new custom tax benefit
+  createCustomBenefit: publicProcedure
+    .input(z.object({
+      year: z.number(),
+      benefit_type: z.string().min(1),
+      name: z.string().min(1),
+      description: z.string().optional(),
+      amount: z.number().optional(),
+      percentage: z.number().optional(),
+      requires_hours_criterion: z.boolean().optional(),
+      minimum_hours_required: z.number().optional(),
+      eligibility_criteria: z.string().optional(),
+      max_usage_count: z.number().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Get the tax_year_id
+      const yearResult = await ctx.db.query(
+        'SELECT id FROM tax_years WHERE year = $1',
+        [input.year]
+      );
+
+      if (yearResult.rows.length === 0) {
+        throw new Error(`Tax year ${input.year} not found`);
+      }
+
+      const taxYearId = yearResult.rows[0].id;
+
+      // Insert the new benefit
+      const benefitResult = await ctx.db.query(
+        `INSERT INTO tax_benefits
+          (tax_year_id, benefit_type, name, description, amount, percentage, requires_hours_criterion, minimum_hours_required, eligibility_criteria, max_usage_count, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+         RETURNING *`,
+        [
+          taxYearId,
+          input.benefit_type,
+          input.name,
+          input.description || null,
+          input.amount || null,
+          input.percentage || null,
+          input.requires_hours_criterion || false,
+          input.minimum_hours_required || null,
+          input.eligibility_criteria || null,
+          input.max_usage_count || null,
+        ]
+      );
+
+      const benefitId = benefitResult.rows[0].id;
+
+      // Create a selection entry for this benefit (disabled by default)
+      await ctx.db.query(
+        `INSERT INTO user_benefit_selections (benefit_id, is_enabled)
+         VALUES ($1, false)
+         ON CONFLICT (benefit_id) DO NOTHING`,
+        [benefitId]
+      );
+
+      return { success: true, benefit: benefitResult.rows[0] };
+    }),
+
+  // Toggle a benefit on/off
+  toggleBenefit: publicProcedure
+    .input(z.object({
+      benefitId: z.number(),
+      isEnabled: z.boolean(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.db.query(
+        `INSERT INTO user_benefit_selections (benefit_id, is_enabled, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (benefit_id)
+         DO UPDATE SET
+           is_enabled = EXCLUDED.is_enabled,
+           updated_at = NOW()
+         RETURNING *`,
+        [input.benefitId, input.isEnabled]
+      );
+
+      return { success: true, selection: result.rows[0] };
+    }),
+
+  // Update an existing benefit
+  updateBenefit: publicProcedure
+    .input(z.object({
+      benefitId: z.number(),
+      name: z.string().min(1).optional(),
+      description: z.string().optional(),
+      amount: z.number().optional(),
+      percentage: z.number().optional(),
+      minimum_hours_required: z.number().optional(),
+      eligibility_criteria: z.string().optional(),
+      max_usage_count: z.number().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const updates: string[] = [];
+      const values: any[] = [];
+      let paramCount = 1;
+
+      if (input.name !== undefined) {
+        updates.push(`name = $${paramCount++}`);
+        values.push(input.name);
+      }
+      if (input.description !== undefined) {
+        updates.push(`description = $${paramCount++}`);
+        values.push(input.description || null);
+      }
+      if (input.amount !== undefined) {
+        updates.push(`amount = $${paramCount++}`);
+        values.push(input.amount || null);
+      }
+      if (input.percentage !== undefined) {
+        updates.push(`percentage = $${paramCount++}`);
+        values.push(input.percentage || null);
+      }
+      if (input.minimum_hours_required !== undefined) {
+        updates.push(`minimum_hours_required = $${paramCount++}`);
+        values.push(input.minimum_hours_required || null);
+      }
+      if (input.eligibility_criteria !== undefined) {
+        updates.push(`eligibility_criteria = $${paramCount++}`);
+        values.push(input.eligibility_criteria || null);
+      }
+      if (input.max_usage_count !== undefined) {
+        updates.push(`max_usage_count = $${paramCount++}`);
+        values.push(input.max_usage_count || null);
+      }
+
+      if (updates.length === 0) {
+        throw new Error('No fields to update');
+      }
+
+      updates.push(`updated_at = NOW()`);
+      values.push(input.benefitId);
+
+      const result = await ctx.db.query(
+        `UPDATE tax_benefits SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+        values
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Benefit not found');
+      }
+
+      return { success: true, benefit: result.rows[0] };
+    }),
+
+  // Delete a custom benefit
+  deleteBenefit: publicProcedure
+    .input(z.object({
+      benefitId: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Check if this is one of the core benefits (don't allow deletion)
+      const checkResult = await ctx.db.query(
+        `SELECT benefit_type FROM tax_benefits WHERE id = $1`,
+        [input.benefitId]
+      );
+
+      if (checkResult.rows.length === 0) {
+        throw new Error('Benefit not found');
+      }
+
+      const benefitType = checkResult.rows[0].benefit_type;
+      if (['zelfstandigenaftrek', 'startersaftrek', 'mkb_winstvrijstelling'].includes(benefitType)) {
+        throw new Error('Cannot delete core tax benefits');
+      }
+
+      // Delete the benefit (cascade will delete the selection)
+      await ctx.db.query(
+        `DELETE FROM tax_benefits WHERE id = $1`,
+        [input.benefitId]
+      );
+
+      return { success: true };
+    }),
+
+  // Get tax credits for a specific year
+  getTaxCredits: publicProcedure
+    .input(z.object({
+      year: z.number(),
+    }))
+    .query(async ({ ctx, input }) => {
+      // Get the tax_year_id
+      const yearResult = await ctx.db.query(
+        'SELECT id FROM tax_years WHERE year = $1',
+        [input.year]
+      );
+
+      if (yearResult.rows.length === 0) {
+        throw new Error(`Tax year ${input.year} not found`);
+      }
+
+      const taxYearId = yearResult.rows[0].id;
+
+      // Get tax credits
+      const creditsResult = await ctx.db.query(`
+        SELECT
+          tc.id,
+          tc.credit_type,
+          tc.name,
+          tc.description,
+          tc.max_amount,
+          tc.phaseout_start,
+          tc.phaseout_end,
+          tc.phaseout_rate,
+          COALESCE(utcs.is_enabled, false) as is_enabled
+        FROM tax_credits tc
+        LEFT JOIN user_tax_credit_selections utcs ON utcs.credit_id = tc.id
+        WHERE tc.tax_year_id = $1
+        ORDER BY tc.credit_type
+      `, [taxYearId]);
+
+      // Get arbeidskorting brackets if they exist
+      const arbeidskortingResult = await ctx.db.query(`
+        SELECT
+          bracket_order,
+          income_from,
+          income_to,
+          rate,
+          base_amount,
+          rate_applies_to_excess
+        FROM arbeidskorting_brackets
+        WHERE tax_year_id = $1
+        ORDER BY bracket_order
+      `, [taxYearId]);
+
+      return {
+        credits: creditsResult.rows.map(c => ({
+          id: c.id,
+          credit_type: c.credit_type,
+          name: c.name,
+          description: c.description,
+          max_amount: c.max_amount ? parseFloat(c.max_amount) : null,
+          phaseout_start: c.phaseout_start ? parseFloat(c.phaseout_start) : null,
+          phaseout_end: c.phaseout_end ? parseFloat(c.phaseout_end) : null,
+          phaseout_rate: c.phaseout_rate ? parseFloat(c.phaseout_rate) : null,
+          is_enabled: c.is_enabled,
+        })),
+        arbeidskorting_brackets: arbeidskortingResult.rows.map(b => ({
+          bracket_order: b.bracket_order,
+          income_from: parseFloat(b.income_from),
+          income_to: b.income_to ? parseFloat(b.income_to) : null,
+          rate: b.rate ? parseFloat(b.rate) : null,
+          base_amount: b.base_amount ? parseFloat(b.base_amount) : null,
+          rate_applies_to_excess: b.rate_applies_to_excess,
+        })),
+      };
     }),
 });
 
