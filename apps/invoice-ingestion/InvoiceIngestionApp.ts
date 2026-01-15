@@ -404,13 +404,8 @@ ${fullContext}`;
    * Check if attachment looks like an invoice
    */
   private isInvoiceAttachment(attachment: EmailAttachment): boolean {
-    const invoiceKeywords = ['invoice', 'facture', 'factuur', 'receipt', 'bill', 'bon'];
-    const lowerFilename = attachment.filename.toLowerCase();
-
-    const hasInvoiceKeyword = invoiceKeywords.some((kw) => lowerFilename.includes(kw));
-    const isPDF = attachment.mimeType === 'application/pdf';
-
-    return hasInvoiceKeyword && isPDF;
+    // Accept all PDFs - the email filter already checked for invoice keywords
+    return attachment.mimeType === 'application/pdf';
   }
 
   /**

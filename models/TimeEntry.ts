@@ -51,6 +51,10 @@ export class TimeEntry extends BaseEntity<TimeEntryType> {
     return this.data.notes;
   }
 
+  get isWbso(): boolean {
+    return this.data.is_wbso;
+  }
+
   get isInvoiced(): boolean {
     return this.data.is_invoiced;
   }
@@ -90,6 +94,7 @@ export class TimeEntry extends BaseEntity<TimeEntryType> {
       location: this.data.location,
       objective: this.data.objective,
       notes: this.data.notes,
+      is_wbso: this.data.is_wbso,
       is_invoiced: this.data.is_invoiced,
       invoice_id: this.data.invoice_id,
     };
@@ -108,6 +113,7 @@ export class TimeEntry extends BaseEntity<TimeEntryType> {
       location: row.location || undefined,
       objective: row.objective || undefined,
       notes: row.notes || undefined,
+      is_wbso: row.is_wbso || false,
       is_invoiced: row.is_invoiced || false,
       invoice_id: row.invoice_id || undefined,
       created_at: row.created_at ? new Date(row.created_at) : undefined,

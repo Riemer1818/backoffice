@@ -2,6 +2,23 @@ import { z } from 'zod';
 import { BaseEntitySchema } from './BaseEntity';
 
 /**
+ * Time entry objectives enum
+ */
+export const TimeEntryObjective = z.enum([
+  'development',
+  'research',
+  'meeting',
+  'documentation',
+  'support',
+  'maintenance',
+  'administration',
+  'procurement',
+  'other',
+]);
+
+export type TimeEntryObjectiveType = z.infer<typeof TimeEntryObjective>;
+
+/**
  * Time entry schema
  */
 export const TimeEntrySchema = BaseEntitySchema.extend({
@@ -19,8 +36,11 @@ export const TimeEntrySchema = BaseEntitySchema.extend({
 
   // Details
   location: z.string().max(255).optional(),
-  objective: z.string().optional(),
+  objective: TimeEntryObjective.optional(),
   notes: z.string().optional(),
+
+  // WBSO (R&D tax credit)
+  is_wbso: z.boolean().default(false),
 
   // Invoicing
   is_invoiced: z.boolean().default(false),
