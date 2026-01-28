@@ -1,0 +1,119 @@
+\documentclass[a4paper,10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[dutch]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{eurosym}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{fontspec}
+\usepackage{array}
+\usepackage{colortbl}
+
+% Set page geometry
+\geometry{top=2.5cm, bottom=3cm, left=2.5cm, right=2.5cm}
+
+% Define brand color (matching your logo)
+\definecolor{brandblue}{HTML}{3D4DB7}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{textgray}{HTML}{666666}
+\definecolor{darktext}{HTML}{333333}
+
+% Set default font
+\setmainfont{DejaVu Sans}
+
+% Remove page numbers
+\pagestyle{empty}
+
+% Custom column types
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+
+\begin{document}
+
+% === HEADER SECTION ===
+\noindent
+\hfill
+\begin{minipage}[t]{0.45\textwidth}
+    \raggedleft
+    \includegraphics[height=1.5cm]{{{LOGO_PATH}}}\\[0.4cm]
+    {\small\color{textgray}
+    {{BUSINESS_ADDRESS}}\\
+    {{BUSINESS_POSTAL}} {{BUSINESS_CITY}}\\[0.2cm]
+    {{BUSINESS_EMAIL}}\\
+    {{BUSINESS_PHONE}}\\[0.2cm]
+    KVK: {{KVK_NUMBER}}\\
+    Btw: {{BTW_NUMBER}}\\
+    Bank: {{BUSINESS_IBAN}}
+    }
+\end{minipage}
+
+\vspace{0.8cm}
+
+% === CLIENT INFO ===
+\noindent
+{\color{textgray}\small
+{{CLIENT_COMPANY}}\\
+T.a.v. {{CLIENT_CONTACT}}\\
+{{CLIENT_ADDRESS}}\\
+{{CLIENT_POSTAL}} {{CLIENT_CITY}}\\
+{{CLIENT_KVK_BTW}}
+}
+
+\vspace{1.5cm}
+
+% === INVOICE TITLE AND DATES ===
+\noindent
+\begin{minipage}[b]{0.5\textwidth}
+    {\fontsize{14}{18}\selectfont\color{darktext}Invoice {{INVOICE_NUMBER}}}
+\end{minipage}
+\hfill
+\begin{minipage}[b]{0.4\textwidth}
+    \raggedleft
+    {\small\color{textgray}
+    \begin{tabular}{@{}r@{\hspace{1.5em}}l@{}}
+        Factuurdatum: & {{INVOICE_DATE}}\\
+        Vervaldatum: & {{DUE_DATE}}\\
+    \end{tabular}
+    }
+\end{minipage}
+
+\vspace{0.3cm}
+
+% === INVOICE ITEMS TABLE ===
+% For each item, add a row. Use \midrule[0.3pt] between rows.
+\noindent
+\renewcommand{\arraystretch}{1.4}
+\begin{tabularx}{\textwidth}{@{}X R{2cm}R{3cm}R{1.5cm}@{}}
+    \toprule[0.4pt]
+    \textbf{\color{darktext}Omschrijving} &
+    \textbf{\color{darktext}Uren} &
+    \textbf{\color{darktext}Bedrag} &
+    \textbf{\color{darktext}Btw}\\
+    \midrule[0.4pt]
+{{INVOICE_ITEMS}}
+    \bottomrule[0.4pt]
+\end{tabularx}
+
+\vspace{0.8cm}
+
+% === TOTALS ===
+\noindent
+\hfill
+\begin{tabular}{@{}r@{ }l@{}}
+    {\color{textgray}Subtotaal} & \euro\,{{SUBTOTAL}}\\[0.3cm]
+    {\color{textgray}{{TAX_RATE}}\% btw} & \euro\,{{TAX_AMOUNT}}\\[0.3cm]
+    \midrule[0.4pt]
+    \textbf{\color{darktext}Totaal} & \textbf{\euro\,{{TOTAL_AMOUNT}}}\\
+\end{tabular}
+
+\vspace*{\fill}
+
+% === FOOTER ===
+\noindent
+{\small\color{textgray}
+We verzoeken u vriendelijk het bovenstaande bedrag van \euro\,{{TOTAL_AMOUNT}} voor {{DUE_DATE}} te voldoen op onze bankrekening onder vermelding van het factuurnummer {{INVOICE_NUMBER}}. Voor vragen kunt u contact opnemen per e-mail.
+}
+
+\end{document}
