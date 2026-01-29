@@ -83,22 +83,47 @@ export class InvoiceIngestionApp {
   }
 
   /**
+   * Check if email is likely an invoice/receipt
+   */
+  private isInvoiceEmail(email: Email): boolean {
+    const subject = email.subject.toLowerCase();
+    const body = (email.body || '').toLowerCase();
+
+    const invoiceKeywords = [
+      'facture',
+      'factuur',
+      'invoice',
+      'receipt',
+      'bon',
+      'rekening',
+      'betaling',
+      'payment',
+      'betalingsverzoek',
+    ];
+
+    return invoiceKeywords.some(keyword =>
+      subject.includes(keyword) || body.includes(keyword)
+    );
+  }
+
+  /**
    * Process a single email - creates ONE invoice with multiple attachments
    */
   private async processEmail(email: Email): Promise<void> {
-    console.log(`\n📨 Processing: ${email.subject}`);
+    console.log(`\n📨 Processing: ${email.subject} (from: ${email.from})`);
 
-    // Check if email has attachments
-    if (!email.attachments || email.attachments.length === 0) {
-      console.log('  ⏭️  No attachments, skipping');
+    // Check if it's an invoice/receipt email
+    if (!this.isInvoiceEmail(email)) {
+      console.log('  ⏭️  Not an invoice/receipt email, skipping');
       return;
     }
 
     // Filter invoice attachments
-    const invoiceAttachments = email.attachments.filter(att => this.isInvoiceAttachment(att));
+    const invoiceAttachments = email.attachments?.filter(att => this.isInvoiceAttachment(att)) || [];
 
-    if (invoiceAttachments.length === 0) {
-      console.log('  ⏭️  No invoice attachments, skipping');
+    // If no valid attachments and no substantial body, skip
+    if (invoiceAttachments.length === 0 && (!email.body || email.body.trim().length < 50)) {
+      console.log('  ⏭️  No invoice attachments and no useful email body, skipping');
       return;
     }
 
@@ -109,21 +134,32 @@ export class InvoiceIngestionApp {
       return;
     }
 
-    console.log(`  📄 Found ${invoiceAttachments.length} invoice attachment(s)`);
+    if (invoiceAttachments.length > 0) {
+      console.log(`  📄 Found ${invoiceAttachments.length} invoice attachment(s)`);
+    } else {
+      console.log(`  📧 No attachments - will extract from email body`);
+    }
 
     try {
-      // Pick the primary invoice (prefer "invoice" over "receipt")
-      const primaryAttachment = this.selectPrimaryInvoice(invoiceAttachments);
-      console.log(`  📋 Using primary: ${primaryAttachment.filename}`);
+      let invoiceData: InvoiceData;
 
-      // Extract invoice data from primary attachment with email context
-      const invoiceData = await this.extractInvoiceData(
-        primaryAttachment.data,
-        primaryAttachment.mimeType,
-        email
-      );
+      if (invoiceAttachments.length > 0) {
+        // Has attachments - extract from primary attachment
+        const primaryAttachment = this.selectPrimaryInvoice(invoiceAttachments);
+        console.log(`  📋 Using primary: ${primaryAttachment.filename}`);
 
-      // Create ONE expense record with ALL attachments
+        invoiceData = await this.extractInvoiceData(
+          primaryAttachment.data,
+          primaryAttachment.mimeType,
+          email
+        );
+      } else {
+        // No attachments - extract directly from email body
+        console.log(`  📧 Extracting from email body only`);
+        invoiceData = await this.extractInvoiceDataFromEmail(email);
+      }
+
+      // Create ONE expense record with ALL attachments (or none)
       await this.createExpenseWithAttachments(invoiceData, invoiceAttachments, email);
 
       console.log(`  ✅ Created expense: ${invoiceData.vendor} - €${invoiceData.amount} (${invoiceAttachments.length} files)`);
@@ -211,6 +247,46 @@ ${fullContext}`;
     );
 
     // Override currency and language with step 1 results
+    invoiceData.currency = currencyInfo.currency;
+    invoiceData.language = currencyInfo.language;
+
+    return invoiceData;
+  }
+
+  /**
+   * Extract invoice data from email body only (no attachments)
+   */
+  private async extractInvoiceDataFromEmail(email: Email): Promise<InvoiceData> {
+    const fullContext = `EMAIL CONTEXT:
+Subject: ${email.subject}
+From: ${email.from}
+Body:
+${email.body || '(no body)'}`;
+
+    // STEP 1: Detect currency and language
+    console.log('  🔍 Step 1: Detecting currency and language...');
+    const currencySchema = `{
+  "currency": "string (3-letter ISO code: USD, EUR, GBP, SGD, JPY, CHF, CAD, AUD, etc.)",
+  "language": "string (2-letter ISO code: en, nl, fr, de, es, etc.)"
+}`;
+
+    const currencyInfo = await this.llmService.extractStructured<{ currency: string; language: string }>(
+      fullContext,
+      currencySchema,
+      { metadata: { app: 'invoice-ingestion-email-currency' } }
+    );
+
+    console.log(`  💱 Detected: ${currencyInfo.currency} (${currencyInfo.language})`);
+
+    // STEP 2: Extract invoice details
+    console.log('  📋 Step 2: Extracting invoice details from email...');
+    const invoiceData = await this.llmService.extractStructured<InvoiceData>(
+      fullContext,
+      INVOICE_SCHEMA,
+      { metadata: { app: 'invoice-ingestion-email' } }
+    );
+
+    // Override currency and language
     invoiceData.currency = currencyInfo.currency;
     invoiceData.language = currencyInfo.language;
 
@@ -404,8 +480,17 @@ ${fullContext}`;
    * Check if attachment looks like an invoice
    */
   private isInvoiceAttachment(attachment: EmailAttachment): boolean {
-    // Accept all PDFs - the email filter already checked for invoice keywords
-    return attachment.mimeType === 'application/pdf';
+    const validMimeTypes = [
+      'application/pdf',
+      'image/png',
+      'image/jpeg',
+      'image/jpg',
+      'image/gif',
+      'image/webp',
+      'image/bmp',
+    ];
+
+    return validMimeTypes.includes(attachment.mimeType);
   }
 
   /**

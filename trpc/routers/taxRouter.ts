@@ -102,6 +102,12 @@ const taxRouter = router({
         balance: parseFloat(row.balance) || 0,
         status: row.status,
         expected_refund: parseFloat(row.expected_refund) || 0,
+        exports_non_eu: parseFloat(row.exports_non_eu) || 0,
+        exports_eu: parseFloat(row.exports_eu) || 0,
+        imports_non_eu_revenue: parseFloat(row.imports_non_eu_revenue) || 0,
+        imports_non_eu_vat: parseFloat(row.imports_non_eu_vat) || 0,
+        imports_eu_revenue: parseFloat(row.imports_eu_revenue) || 0,
+        imports_eu_vat: parseFloat(row.imports_eu_vat) || 0,
       }));
     }),
 

@@ -24,7 +24,7 @@ export class LLMService {
     this.langfuseService = LangFuseService.getInstance();
     this.defaultModel = new ChatGoogleGenerativeAI({
       apiKey: process.env.GEMINI_API_KEY,
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.0-flash',
       temperature: 0.7,
     });
   }
@@ -38,13 +38,13 @@ export class LLMService {
   ): Promise<string> {
     const trace = this.langfuseService.createTrace(options.traceName, {
       ...options.metadata,
-      model: options.model || 'gemini-2.0-flash-exp',
+      model: options.model || 'gemini-2.0-flash',
     });
 
     const generation = trace.generation({
       name: options.traceName,
       input: prompt,
-      model: options.model || 'gemini-2.0-flash-exp',
+      model: options.model || 'gemini-2.0-flash',
     });
 
     try {

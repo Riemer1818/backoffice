@@ -99,6 +99,7 @@ const expenseRouter = router({
         total_amount: z.number().optional(),
         project_id: z.number().nullable().optional(),
         currency: z.string().length(3).optional(),
+        invoice_date: z.string().optional(),
       }).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -145,6 +146,11 @@ const expenseRouter = router({
         if (input.edits.project_id !== undefined) {
           params.push(input.edits.project_id);
           setClauses.push(`project_id = $${params.length}`);
+        }
+
+        if (input.edits.invoice_date !== undefined) {
+          params.push(input.edits.invoice_date);
+          setClauses.push(`invoice_date = $${params.length}`);
         }
 
         // Handle currency conversion
@@ -303,6 +309,7 @@ const expenseRouter = router({
         total_amount: z.number().optional(),
         project_id: z.number().nullable().optional(),
         currency: z.string().length(3).optional(),
+        invoice_date: z.string().optional(),
       }),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -318,11 +325,12 @@ const expenseRouter = router({
         throw new Error('Expense not found');
       }
 
-      const invoiceDate = currentExpense.rows[0].invoice_date;
+      const invoiceDate = input.data.invoice_date ? new Date(input.data.invoice_date) : currentExpense.rows[0].invoice_date;
       const currentCurrency = currentExpense.rows[0].original_currency || 'EUR';
       const newCurrency = input.data.currency || currentCurrency;
 
       console.log(`🔍 Update: Current currency: ${currentCurrency}, New currency: ${newCurrency}`);
+      console.log(`🔍 Update: Invoice date:`, invoiceDate);
 
       // Get the amounts to work with (either edited or current)
       const totalAmount = input.data.total_amount ?? currentExpense.rows[0].total_amount;
@@ -348,6 +356,11 @@ const expenseRouter = router({
       if (input.data.project_id !== undefined) {
         params.push(input.data.project_id);
         setClauses.push(`project_id = $${params.length}`);
+      }
+
+      if (input.data.invoice_date !== undefined) {
+        params.push(input.data.invoice_date);
+        setClauses.push(`invoice_date = $${params.length}`);
       }
 
       // Handle currency conversion
