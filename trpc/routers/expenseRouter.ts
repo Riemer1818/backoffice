@@ -9,6 +9,7 @@ const expenseRouter = router({
     .input(z.object({
       reviewStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
       supplierId: z.number().optional(),
+      projectId: z.number().optional(),
     }).optional())
     .query(async ({ ctx, input }) => {
       let query = 'SELECT * FROM incoming_invoices WHERE 1=1';
@@ -22,6 +23,11 @@ const expenseRouter = router({
       if (input?.supplierId) {
         params.push(input.supplierId);
         query += ` AND supplier_id = $${params.length}`;
+      }
+
+      if (input?.projectId) {
+        params.push(input.projectId);
+        query += ` AND project_id = $${params.length}`;
       }
 
       query += ' ORDER BY invoice_date DESC';
