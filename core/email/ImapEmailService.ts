@@ -21,6 +21,7 @@ export interface Email {
   body: string;
   htmlBody?: string;
   attachments: EmailAttachment[];
+  isRead: boolean;
 }
 
 export interface ImapConfig {
@@ -140,7 +141,8 @@ export class ImapEmailService extends EventEmitter {
                   return;
                 }
 
-                emails.push(this.parsedMailToEmail(parsed, String(seqno)));
+                // Unread emails are always isRead: false
+                emails.push(this.parsedMailToEmail(parsed, String(seqno), false));
                 resolveMsg();
               });
             });
@@ -194,9 +196,17 @@ export class ImapEmailService extends EventEmitter {
 
         const fetch = this.imap!.fetch(uids, {
           bodies: '',
+          struct: true,
         });
 
         fetch.on('message', (msg: any, seqno: number) => {
+          let isRead = false;
+
+          msg.on('attributes', (attrs: any) => {
+            // Check if email has \Seen flag (means it's read)
+            isRead = attrs.flags?.includes('\\Seen') || false;
+          });
+
           msg.on('body', (stream: any) => {
             const parsePromise = new Promise<void>((resolveMsg) => {
               simpleParser(stream, async (err: any, parsed: any) => {
@@ -206,7 +216,7 @@ export class ImapEmailService extends EventEmitter {
                   return;
                 }
 
-                emails.push(this.parsedMailToEmail(parsed, String(seqno)));
+                emails.push(this.parsedMailToEmail(parsed, String(seqno), isRead));
                 resolveMsg();
               });
             });
@@ -261,7 +271,7 @@ export class ImapEmailService extends EventEmitter {
   /**
    * Convert ParsedMail to Email interface
    */
-  private parsedMailToEmail(parsed: ParsedMail, id: string): Email {
+  private parsedMailToEmail(parsed: ParsedMail, id: string, isRead: boolean = false): Email {
     const attachments: EmailAttachment[] = [];
 
     if (parsed.attachments) {
@@ -286,6 +296,7 @@ export class ImapEmailService extends EventEmitter {
       body: parsed.text || '',
       htmlBody: parsed.html || undefined,
       attachments,
+      isRead,
     };
   }
 
