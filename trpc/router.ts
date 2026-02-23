@@ -3,6 +3,7 @@ import { companyRouter } from './routers/companyRouter';
 import { projectRouter } from './routers/projectRouter';
 import { invoiceRouter } from './routers/invoiceRouter';
 import { expenseRouter } from './routers/expenseRouter';
+import { expenseCategoryRouter } from './routers/expenseCategoryRouter';
 import { reportingRouter } from './routers/reportingRouter';
 import { timeEntriesRouter } from './routers/timeEntriesRouter';
 import { contactRouter } from './routers/contactRouter';
@@ -15,6 +16,7 @@ export const appRouter = router({
   project: projectRouter,
   invoice: invoiceRouter,
   expense: expenseRouter,
+  expenseCategory: expenseCategoryRouter,
   reporting: reportingRouter,
   timeEntries: timeEntriesRouter,
   contact: contactRouter,

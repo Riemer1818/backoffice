@@ -106,6 +106,8 @@ const expenseRouter = router({
         project_id: z.number().nullable().optional(),
         currency: z.string().length(3).optional(),
         invoice_date: z.string().optional(),
+        notes: z.string().optional(),
+        category: z.number().nullable().optional(),
       }).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -157,6 +159,16 @@ const expenseRouter = router({
         if (input.edits.invoice_date !== undefined) {
           params.push(input.edits.invoice_date);
           setClauses.push(`invoice_date = $${params.length}`);
+        }
+
+        if (input.edits.notes !== undefined) {
+          params.push(input.edits.notes);
+          setClauses.push(`notes = $${params.length}`);
+        }
+
+        if (input.edits.category !== undefined) {
+          params.push(input.edits.category);
+          setClauses.push(`category_id = $${params.length}`);
         }
 
         // Handle currency conversion
@@ -316,6 +328,8 @@ const expenseRouter = router({
         project_id: z.number().nullable().optional(),
         currency: z.string().length(3).optional(),
         invoice_date: z.string().optional(),
+        notes: z.string().optional(),
+        category: z.number().nullable().optional(),
       }),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -367,6 +381,16 @@ const expenseRouter = router({
       if (input.data.invoice_date !== undefined) {
         params.push(input.data.invoice_date);
         setClauses.push(`invoice_date = $${params.length}`);
+      }
+
+      if (input.data.notes !== undefined) {
+        params.push(input.data.notes);
+        setClauses.push(`notes = $${params.length}`);
+      }
+
+      if (input.data.category !== undefined) {
+        params.push(input.data.category);
+        setClauses.push(`category_id = $${params.length}`);
       }
 
       // Handle currency conversion
@@ -479,6 +503,8 @@ const expenseRouter = router({
       total_amount: z.number(),
       project_id: z.number().nullable().optional(),
       currency: z.string().length(3),
+      notes: z.string().optional(),
+      category: z.number().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const converter = new CurrencyConverter();
@@ -492,6 +518,7 @@ const expenseRouter = router({
 
       // Convert to EUR if needed
       if (currency !== 'EUR') {
+        console.log(`💱 Converting ${currency} ${input.total_amount} to EUR on date ${input.invoice_date}`);
         const conversion = await converter.convert(
           input.total_amount,
           currency,
@@ -499,6 +526,7 @@ const expenseRouter = router({
           input.invoice_date
         );
 
+        console.log(`💱 Conversion result:`, conversion);
         exchangeRate = conversion.rate;
         exchangeRateDate = new Date(conversion.date);
 
@@ -506,6 +534,8 @@ const expenseRouter = router({
         eurTotal = conversion.convertedAmount;
         eurSubtotal = input.subtotal * ratio;
         eurVat = input.tax_amount * ratio;
+
+        console.log(`💱 EUR amounts - Total: €${eurTotal.toFixed(2)}, Subtotal: €${eurSubtotal.toFixed(2)}, VAT: €${eurVat.toFixed(2)}`);
       }
 
       const result = await ctx.db.query(
@@ -514,8 +544,8 @@ const expenseRouter = router({
           subtotal, tax_amount, total_amount,
           original_currency, original_amount, original_subtotal, original_tax_amount,
           exchange_rate, exchange_rate_date,
-          project_id, review_status, payment_status, source
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          project_id, review_status, payment_status, source, notes, category_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING *`,
         [
           input.supplier_name,
@@ -533,7 +563,9 @@ const expenseRouter = router({
           input.project_id || null,
           'pending',
           'unpaid',
-          'manual'
+          'manual',
+          input.notes || null,
+          input.category || null,
         ]
       );
 
@@ -547,44 +579,54 @@ const expenseRouter = router({
       filename: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { DocumentParser } = await import('../../core/parsers/DocumentParser');
-      const { LLMService } = await import('../../core/llm/LLMService');
+      try {
+        console.log('📄 Extracting PDF:', input.filename);
 
-      const pdfBuffer = Buffer.from(input.pdfBase64.split(',')[1] || input.pdfBase64, 'base64');
-      const parser = new DocumentParser();
-      const llm = new LLMService();
+        const { DocumentParser } = await import('../../core/parsers/DocumentParser');
+        const { LLMService } = await import('../../core/llm/LLMService');
 
-      // Parse PDF to text
-      const parsed = await parser.parse(pdfBuffer, 'application/pdf');
+        const pdfBuffer = Buffer.from(input.pdfBase64.split(',')[1] || input.pdfBase64, 'base64');
+        console.log('📄 PDF buffer size:', pdfBuffer.length);
 
-      if (!parsed.text.trim()) {
-        throw new Error('Could not extract text from PDF');
-      }
+        const parser = new DocumentParser();
+        const llm = new LLMService();
 
-      // Step 1: Detect currency and language
-      const currencySchema = `{
-  "currency": "string (3-letter ISO code: USD, EUR, GBP, SGD, JPY, CHF, CAD, AUD, etc.)",
+        // Parse PDF to text
+        const parsed = await parser.parse(pdfBuffer, 'application/pdf');
+        console.log('📄 Extracted text length:', parsed.text.length);
+        console.log('📄 First 200 chars:', parsed.text.substring(0, 200));
+
+        if (!parsed.text.trim()) {
+          throw new Error('This PDF appears to be image-based (scanned). Text-based PDFs are required for automatic extraction. Please enter the invoice details manually.');
+        }
+
+        // Step 1: Detect currency and language
+        const currencySchema = `{
+  "currency": "string (3-letter ISO code: USD, EUR, GBP, SGD, JPY, CHF, CAD, AUD, INR, etc.)",
   "language": "string (2-letter ISO code: en, nl, fr, de, es, etc.)"
 }`;
 
-      const currencyPrompt = `Look at this invoice PDF. What currency and language is it in?
+        const currencyPrompt = `Look at this invoice PDF. What currency and language is it in?
 
 INSTRUCTIONS:
-- Look for currency SYMBOLS: $, £, €, ¥, S$, C$, A$
-- Look for currency CODES: USD, EUR, GBP, SGD, JPY, CHF, CAD, AUD
+- Look for currency SYMBOLS: $, £, €, ¥, ₹, S$, C$, A$
+- Look for currency CODES: USD, EUR, GBP, SGD, JPY, CHF, CAD, AUD, INR
 - If you see "$" determine if it's USD, SGD, CAD, or AUD from context
+- If you see "₹" or "Rs" or "INR" it's Indian Rupees (INR)
 - For language, detect from the text content
 
 ${parsed.text}`;
 
-      const currencyInfo = await llm.extractStructured<{ currency: string; language: string }>(
-        currencyPrompt,
-        currencySchema,
-        { metadata: { app: 'manual-invoice-currency' } }
-      );
+        console.log('🔍 Extracting currency and language...');
+        const currencyInfo = await llm.extractStructured<{ currency: string; language: string }>(
+          currencyPrompt,
+          currencySchema,
+          { metadata: { app: 'manual-invoice-currency' } }
+        );
+        console.log('🔍 Currency:', currencyInfo.currency, 'Language:', currencyInfo.language);
 
-      // Step 2: Extract full invoice data
-      const invoiceSchema = `{
+        // Step 2: Extract full invoice data
+        const invoiceSchema = `{
   "vendor": "string (company/supplier name)",
   "date": "string (YYYY-MM-DD format)",
   "amount": "number (total amount including VAT)",
@@ -593,25 +635,31 @@ ${parsed.text}`;
   "invoiceNumber": "string (invoice/reference number if present)"
 }`;
 
-      const invoiceData = await llm.extractStructured<{
-        vendor: string;
-        date: string;
-        amount: number;
-        vatAmount?: number;
-        description: string;
-        invoiceNumber?: string;
-      }>(parsed.text, invoiceSchema, { metadata: { app: 'manual-invoice-extraction' } });
+        console.log('🔍 Extracting invoice data...');
+        const invoiceData = await llm.extractStructured<{
+          vendor: string;
+          date: string;
+          amount: number;
+          vatAmount?: number;
+          description: string;
+          invoiceNumber?: string;
+        }>(parsed.text, invoiceSchema, { metadata: { app: 'manual-invoice-extraction' } });
+        console.log('✅ Extraction complete:', invoiceData);
 
-      return {
-        supplier_name: invoiceData.vendor,
-        description: invoiceData.description,
-        invoice_date: invoiceData.date,
-        subtotal: invoiceData.amount - (invoiceData.vatAmount || 0),
-        tax_amount: invoiceData.vatAmount || 0,
-        total_amount: invoiceData.amount,
-        currency: currencyInfo.currency,
-        language: currencyInfo.language,
-      };
+        return {
+          supplier_name: invoiceData.vendor,
+          description: invoiceData.description,
+          invoice_date: invoiceData.date,
+          subtotal: invoiceData.amount - (invoiceData.vatAmount || 0),
+          tax_amount: invoiceData.vatAmount || 0,
+          total_amount: invoiceData.amount,
+          currency: currencyInfo.currency,
+          language: currencyInfo.language,
+        };
+      } catch (error) {
+        console.error('❌ PDF extraction error:', error);
+        throw error;
+      }
     }),
 
   // Delete expense
