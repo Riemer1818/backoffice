@@ -15,6 +15,8 @@ export interface Email {
   subject: string;
   from: string;
   to: string;
+  cc?: string;
+  bcc?: string;
   date: Date;
   body: string;
   htmlBody?: string;
@@ -278,6 +280,8 @@ export class ImapEmailService extends EventEmitter {
       subject: parsed.subject || '',
       from: this.extractEmail(parsed.from),
       to: this.extractEmail(parsed.to),
+      cc: this.extractEmailList(parsed.cc),
+      bcc: this.extractEmailList(parsed.bcc),
       date: parsed.date || new Date(),
       body: parsed.text || '',
       htmlBody: parsed.html || undefined,
@@ -298,6 +302,28 @@ export class ImapEmailService extends EventEmitter {
       return addressObj.value[0]?.address || '';
     }
     return '';
+  }
+
+  /**
+   * Extract list of email addresses (for CC/BCC)
+   */
+  private extractEmailList(addressObj: any): string | undefined {
+    if (!addressObj) return undefined;
+    if (typeof addressObj === 'string') return addressObj;
+
+    const emails: string[] = [];
+
+    if (Array.isArray(addressObj)) {
+      for (const addr of addressObj) {
+        if (addr.address) emails.push(addr.address);
+      }
+    } else if (addressObj.value && Array.isArray(addressObj.value)) {
+      for (const addr of addressObj.value) {
+        if (addr.address) emails.push(addr.address);
+      }
+    }
+
+    return emails.length > 0 ? emails.join(', ') : undefined;
   }
 
   /**
