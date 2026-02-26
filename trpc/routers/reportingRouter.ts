@@ -20,26 +20,61 @@ const reportingRouter = router({
   // Get dashboard stats
   getDashboardStats: publicProcedure
     .query(async ({ ctx }) => {
-      const result = await ctx.db.query(`
+      // Get dashboard stats
+      const dashboardResult = await ctx.db.query(`
         SELECT * FROM dashboard_stats
       `);
+      const row = dashboardResult.rows[0];
 
-      const row = result.rows[0];
+      // Get current quarter VAT
+      const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
+      const currentYear = new Date().getFullYear();
+      const vatResult = await ctx.db.query(`
+        SELECT net_vat_to_pay FROM vat_declaration
+        WHERE year = $1 AND quarter = $2
+      `, [currentYear, currentQuarter]);
+      const vatThisQuarter = vatResult.rows[0]?.net_vat_to_pay || 0;
+
+      // Get total VAT to pay (all quarters with positive balance)
+      const vatTotalResult = await ctx.db.query(`
+        SELECT SUM(balance) as total
+        FROM vat_settlement
+        WHERE balance > 0
+      `);
+      const vatToPayTotal = vatTotalResult.rows[0]?.total || 0;
+
+      // Get pending expenses
+      const pendingExpensesResult = await ctx.db.query(`
+        SELECT
+          COUNT(*) as count,
+          COALESCE(SUM(total_amount), 0) as amount
+        FROM incoming_invoices
+        WHERE review_status = 'pending'
+      `);
+      const pendingExpenses = pendingExpensesResult.rows[0];
+
+      // Get active projects count
+      const activeProjectsResult = await ctx.db.query(`
+        SELECT COUNT(*) as count
+        FROM projects
+        WHERE status = 'active'
+      `);
+      const activeProjectsCount = activeProjectsResult.rows[0]?.count || 0;
 
       // Convert PostgreSQL numeric strings to numbers
       return {
-        income_this_month: parseFloat(row.income_this_month) || 0,
-        expenses_this_month: parseFloat(row.expenses_this_month) || 0,
-        profit_this_month: parseFloat(row.profit_this_month) || 0,
-        vat_this_quarter: parseFloat(row.vat_this_quarter) || 0,
-        vat_to_pay_total: parseFloat(row.vat_to_pay_total) || 0,
-        estimated_income_tax_ytd: parseFloat(row.estimated_income_tax_ytd) || 0,
-        pending_expenses_count: parseInt(row.pending_expenses_count) || 0,
-        pending_expenses_amount: parseFloat(row.pending_expenses_amount) || 0,
-        active_projects_count: parseInt(row.active_projects_count) || 0,
-        income_ytd: parseFloat(row.income_ytd) || 0,
-        expenses_ytd: parseFloat(row.expenses_ytd) || 0,
-        profit_ytd: parseFloat(row.profit_ytd) || 0,
+        income_this_month: parseFloat(row.monthly_income) || 0,
+        expenses_this_month: parseFloat(row.monthly_expenses) || 0,
+        profit_this_month: parseFloat(row.monthly_profit) || 0,
+        vat_this_quarter: parseFloat(vatThisQuarter) || 0,
+        vat_to_pay_total: parseFloat(vatToPayTotal) || 0,
+        estimated_income_tax_ytd: parseFloat(row.current_income_tax_owed) || 0,
+        pending_expenses_count: parseInt(pendingExpenses.count) || 0,
+        pending_expenses_amount: parseFloat(pendingExpenses.amount) || 0,
+        active_projects_count: parseInt(activeProjectsCount) || 0,
+        income_ytd: parseFloat(row.ytd_revenue) || 0,
+        expenses_ytd: parseFloat(row.ytd_expenses) || 0,
+        profit_ytd: parseFloat(row.ytd_profit) || 0,
       };
     }),
 
@@ -216,12 +251,36 @@ const reportingRouter = router({
         ORDER BY period ASC
       `);
 
-      return result.rows.map(row => ({
-        period: row.period,
-        income: parseFloat(row.income_excl_vat) || 0,
-        expenses: parseFloat(row.expense_excl_vat) || 0,
-        profit: parseFloat(row.profit_excl_vat) || 0,
-      }));
+      // Get uninvoiced income per month
+      const uninvoicedResult = await ctx.db.query(`
+        SELECT
+          DATE_TRUNC('month', te.date) as period,
+          COALESCE(SUM(te.chargeable_hours * p.hourly_rate), 0) as uninvoiced_amount
+        FROM time_entries te
+        LEFT JOIN projects p ON te.project_id = p.id
+        WHERE te.is_invoiced = false
+          AND te.date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '${months} months')
+        GROUP BY DATE_TRUNC('month', te.date)
+        ORDER BY period ASC
+      `);
+
+      const uninvoicedMap = new Map();
+      uninvoicedResult.rows.forEach(row => {
+        // Normalize to YYYY-MM format for reliable matching
+        const key = row.period.toISOString().substring(0, 7);
+        uninvoicedMap.set(key, parseFloat(row.uninvoiced_amount) || 0);
+      });
+
+      return result.rows.map(row => {
+        const key = row.period.toISOString().substring(0, 7);
+        return {
+          period: row.period,
+          income: parseFloat(row.income_excl_vat) || 0,
+          expenses: parseFloat(row.expense_excl_vat) || 0,
+          profit: parseFloat(row.profit_excl_vat) || 0,
+          uninvoiced: uninvoicedMap.get(key) || 0,
+        };
+      });
     }),
 });
 

@@ -18,6 +18,9 @@ export interface EmailRecord {
   processing_error?: string;
   processed_at?: Date;
   linked_invoice_id?: number;
+  linked_company_id?: number;
+  linked_contact_id?: number;
+  label?: 'incoming_invoice' | 'receipt' | 'newsletter' | 'other';
   has_attachments: boolean;
   attachment_count: number;
   created_at: Date;
@@ -68,6 +71,10 @@ export interface EmailFilters {
   processing_status?: string;
   has_attachments?: boolean;
   from_address?: string;
+  label?: 'incoming_invoice' | 'receipt' | 'newsletter' | 'other';
+  labelIsNull?: boolean;
+  linked_company_id?: number;
+  linked_contact_id?: number;
   date_from?: Date;
   date_to?: Date;
   limit?: number;
@@ -192,6 +199,25 @@ export class EmailRepository {
     if (filters.from_address) {
       conditions.push(`from_address ILIKE $${paramIndex++}`);
       params.push(`%${filters.from_address}%`);
+    }
+
+    if (filters.label) {
+      conditions.push(`label = $${paramIndex++}`);
+      params.push(filters.label);
+    }
+
+    if (filters.labelIsNull) {
+      conditions.push(`label IS NULL`);
+    }
+
+    if (filters.linked_company_id !== undefined) {
+      conditions.push(`linked_company_id = $${paramIndex++}`);
+      params.push(filters.linked_company_id);
+    }
+
+    if (filters.linked_contact_id !== undefined) {
+      conditions.push(`linked_contact_id = $${paramIndex++}`);
+      params.push(filters.linked_contact_id);
     }
 
     if (filters.date_from) {
@@ -357,5 +383,139 @@ export class EmailRepository {
     );
 
     return result.rows.length > 0;
+  }
+
+  /**
+   * Update email label
+   */
+  async updateLabel(
+    id: number,
+    label: 'incoming_invoice' | 'receipt' | 'newsletter' | 'other' | null
+  ): Promise<EmailRecord | null> {
+    const result = await this.pool.query(
+      `UPDATE emails
+       SET label = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING *`,
+      [label, id]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Link email to company
+   */
+  async linkToCompany(emailId: number, companyId: number | null): Promise<EmailRecord | null> {
+    const result = await this.pool.query(
+      `UPDATE emails
+       SET linked_company_id = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING *`,
+      [companyId, emailId]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Link email to contact
+   */
+  async linkToContact(emailId: number, contactId: number | null): Promise<EmailRecord | null> {
+    const result = await this.pool.query(
+      `UPDATE emails
+       SET linked_contact_id = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING *`,
+      [contactId, emailId]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Auto-match email to company/contact based on from_address
+   * Returns { companyId, contactId } or null if no match
+   */
+  async autoMatchCompanyContact(fromAddress: string): Promise<{
+    companyId: number | null;
+    contactId: number | null;
+  }> {
+    const email = fromAddress.toLowerCase().trim();
+    const domain = email.split('@')[1];
+
+    if (!domain) {
+      return { companyId: null, contactId: null };
+    }
+
+    // First try exact match on contacts
+    const contactResult = await this.pool.query(
+      `SELECT id, company_id FROM contacts
+       WHERE LOWER(email) = $1
+       AND is_active = true
+       LIMIT 1`,
+      [email]
+    );
+
+    if (contactResult.rows.length > 0) {
+      return {
+        contactId: contactResult.rows[0].id,
+        companyId: contactResult.rows[0].company_id,
+      };
+    }
+
+    // Try exact match on company email
+    const companyResult = await this.pool.query(
+      `SELECT id FROM companies
+       WHERE LOWER(email) = $1
+       AND is_active = true
+       LIMIT 1`,
+      [email]
+    );
+
+    if (companyResult.rows.length > 0) {
+      return {
+        contactId: null,
+        companyId: companyResult.rows[0].id,
+      };
+    }
+
+    // Extract base domain (e.g., mail.anthropic.com -> anthropic.com)
+    const domainParts = domain.split('.');
+    const baseDomain = domainParts.length > 2
+      ? domainParts.slice(-2).join('.')
+      : domain;
+
+    // Domain matching: check company website and email domains
+    const domainResult = await this.pool.query(
+      `SELECT id FROM companies
+       WHERE is_active = true
+       AND (
+         LOWER(email) LIKE $1
+         OR LOWER(email) LIKE $2
+         OR LOWER(website) LIKE $3
+         OR LOWER(website) LIKE $4
+         OR LOWER(website) LIKE $5
+         OR LOWER(website) LIKE $6
+       )
+       LIMIT 1`,
+      [
+        `%@${domain}`,
+        `%@${baseDomain}`,
+        `%://${domain}%`,
+        `%://${baseDomain}%`,
+        `%://${domain}`,
+        `%www.${domain}%`,
+      ]
+    );
+
+    if (domainResult.rows.length > 0) {
+      return {
+        contactId: null,
+        companyId: domainResult.rows[0].id,
+      };
+    }
+
+    return { companyId: null, contactId: null };
   }
 }

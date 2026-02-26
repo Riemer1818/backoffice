@@ -15,9 +15,12 @@ const expenseRouter = router({
       let query = 'SELECT * FROM incoming_invoices WHERE 1=1';
       const params: any[] = [];
 
+      // By default, exclude rejected expenses unless explicitly requested
       if (input?.reviewStatus) {
         params.push(input.reviewStatus);
         query += ` AND review_status = $${params.length}`;
+      } else {
+        query += ` AND review_status != 'rejected'`;
       }
 
       if (input?.supplierId) {

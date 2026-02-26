@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS emails (
     processing_error TEXT,
     processed_at TIMESTAMPTZ,
 
+    -- Label
+    label VARCHAR(50) CHECK (label IN ('incoming_invoice', 'receipt', 'newsletter', 'other')),
+
     -- Relations
     linked_invoice_id INTEGER REFERENCES incoming_invoices(id) ON DELETE SET NULL,
 
@@ -76,6 +79,7 @@ CREATE INDEX idx_emails_processed ON emails(is_processed);
 CREATE INDEX idx_emails_processing_status ON emails(processing_status);
 CREATE INDEX idx_emails_has_attachments ON emails(has_attachments);
 CREATE INDEX idx_emails_linked_invoice ON emails(linked_invoice_id);
+CREATE INDEX idx_emails_label ON emails(label);
 
 CREATE INDEX idx_email_attachments_email ON email_attachments(email_id);
 CREATE INDEX idx_email_attachments_mime ON email_attachments(mime_type);

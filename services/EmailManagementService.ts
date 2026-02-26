@@ -42,6 +42,7 @@ export class EmailManagementService {
 
   /**
    * Fetch unread emails from IMAP and save to database
+   * After saving, marks emails as read in IMAP
    */
   async fetchAndSaveUnreadEmails(): Promise<EmailRecord[]> {
     console.log('📧 Fetching unread emails from IMAP...');
@@ -64,6 +65,15 @@ export class EmailManagementService {
         const savedEmail = await this.saveEmail(imapEmail);
         savedEmails.push(savedEmail);
         console.log(`✅ Saved email: ${savedEmail.subject} (ID: ${savedEmail.id})`);
+
+        // Mark as read in IMAP
+        try {
+          await this.imapService.markAsRead(imapEmail.id);
+          console.log(`📧 Marked email ${imapEmail.id} as read in IMAP`);
+        } catch (error) {
+          console.error(`⚠️ Failed to mark email ${imapEmail.id} as read in IMAP:`, error);
+          // Don't fail the whole process if marking as read fails
+        }
       } catch (error) {
         console.error(`❌ Failed to save email ${imapEmail.id}:`, error);
       }
@@ -115,8 +125,23 @@ export class EmailManagementService {
         );
       }
 
+      // Auto-match to company/contact
+      const match = await this.emailRepository.autoMatchCompanyContact(imapEmail.from);
+      if (match.companyId || match.contactId) {
+        await client.query(
+          `UPDATE emails
+           SET linked_company_id = $1, linked_contact_id = $2
+           WHERE id = $3`,
+          [match.companyId, match.contactId, emailRecord.id]
+        );
+        console.log(`Auto-linked email ${emailRecord.id} to company: ${match.companyId}, contact: ${match.contactId}`);
+      }
+
       await client.query('COMMIT');
-      return emailRecord;
+
+      // Return updated record with links
+      const updatedRecord = await this.emailRepository.findById(emailRecord.id);
+      return updatedRecord || emailRecord;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -145,12 +170,21 @@ export class EmailManagementService {
   async listEmails(
     filters: EmailFilters = {},
     page: number = 1,
-    pageSize: number = 50
+    pageSize: number = 50,
+    showUnlabeledOnly: boolean = true
   ): Promise<EmailListResult> {
     const offset = (page - 1) * pageSize;
 
+    const effectiveFilters = { ...filters };
+
+    // By default, only show unlabeled emails (NULL label)
+    // Unless a specific label is requested or showUnlabeledOnly is false
+    if (showUnlabeledOnly && effectiveFilters.label === undefined) {
+      effectiveFilters.labelIsNull = true;
+    }
+
     const emails = await this.emailRepository.list({
-      ...filters,
+      ...effectiveFilters,
       limit: pageSize,
       offset,
     });
@@ -271,5 +305,94 @@ export class EmailManagementService {
    */
   async emailExists(uid: string): Promise<boolean> {
     return this.emailRepository.existsByUid(uid);
+  }
+
+  /**
+   * Update email label and process if needed
+   */
+  async updateEmailLabel(
+    emailId: number,
+    label: 'incoming_invoice' | 'receipt' | 'newsletter' | 'other' | null
+  ): Promise<EmailRecord | null> {
+    const updatedEmail = await this.emailRepository.updateLabel(emailId, label);
+
+    if (!updatedEmail) {
+      return null;
+    }
+
+    // Auto-process invoices and receipts
+    if (label === 'incoming_invoice' || label === 'receipt') {
+      try {
+        console.log(`Processing email ${emailId} as ${label}...`);
+        await this.processEmailAsInvoice(updatedEmail);
+
+        // Mark as processed
+        await this.emailRepository.updateProcessingStatus(emailId, 'completed');
+      } catch (error) {
+        console.error(`Failed to process email ${emailId} as invoice:`, error);
+        await this.emailRepository.updateProcessingStatus(
+          emailId,
+          'failed',
+          error instanceof Error ? error.message : 'Unknown error'
+        );
+      }
+    } else if (label === 'newsletter' || label === 'other') {
+      // Just mark as processed, no further action
+      await this.emailRepository.updateProcessingStatus(emailId, 'skipped');
+    }
+
+    return updatedEmail;
+  }
+
+  /**
+   * Process an email as an invoice - creates incoming_invoice record
+   */
+  private async processEmailAsInvoice(email: EmailRecord): Promise<void> {
+    const { InvoiceIngestionApp } = await import('../apps/invoice-ingestion/InvoiceIngestionApp');
+
+    // Get email attachments
+    const attachments = await this.emailRepository.getAttachments(email.id);
+
+    // Convert EmailRecord + attachments to IMAP Email format
+    const imapEmail: ImapEmail = {
+      id: email.email_uid,
+      subject: email.subject || '',
+      from: email.from_address,
+      to: email.to_address || '',
+      cc: email.cc_address,
+      bcc: email.bcc_address,
+      date: email.email_date,
+      body: email.body_text || '',
+      htmlBody: email.body_html,
+      attachments: attachments.map(att => ({
+        filename: att.filename,
+        mimeType: att.mime_type,
+        data: att.file_data,
+        size: att.file_size,
+      })),
+      isRead: email.is_read,
+    };
+
+    const ingestionApp = new InvoiceIngestionApp(this.pool);
+
+    // Use the processEmail method - need to make it public or refactor
+    // @ts-ignore - accessing private method
+    await ingestionApp.processEmail(imapEmail);
+
+    await ingestionApp.shutdown();
+  }
+
+  /**
+   * Manually link email to company
+   */
+  async linkEmailToCompany(emailId: number, companyId: number | null): Promise<EmailRecord | null> {
+    return this.emailRepository.linkToCompany(emailId, companyId);
+  }
+
+  /**
+   * Manually link email to contact
+   */
+  async linkEmailToContact(emailId: number, contactId: number | null): Promise<EmailRecord | null> {
+    return this.emailRepository.linkToContact(emailId, contactId);
   }
 }

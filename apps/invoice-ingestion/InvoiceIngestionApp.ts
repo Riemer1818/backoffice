@@ -109,7 +109,7 @@ export class InvoiceIngestionApp {
   /**
    * Process a single email - creates ONE invoice with multiple attachments
    */
-  private async processEmail(email: Email): Promise<void> {
+  public async processEmail(email: Email): Promise<void> {
     console.log(`\n📨 Processing: ${email.subject} (from: ${email.from})`);
 
     // Check if it's an invoice/receipt email

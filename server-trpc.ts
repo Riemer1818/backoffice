@@ -7,6 +7,7 @@ import { appRouter } from './trpc/router';
 import { createContext } from './trpc/context';
 // import { InvoiceIngestionApp } from './apps/invoice-ingestion/InvoiceIngestionApp';
 import { Pool } from 'pg';
+import { EmailManagementService } from './services/EmailManagementService';
 
 const app = express();
 
@@ -57,4 +58,27 @@ app.listen(PORT, () => {
   // });
 
   // console.log('✅ Automated invoice ingestion scheduler started');
+
+  // Start automated email fetching (every 5 minutes)
+  console.log('📧 Starting automated email fetching scheduler (every 5 minutes)...');
+
+  cron.schedule('*/5 * * * *', async () => {
+    console.log('\n⏰ [Scheduled] Fetching emails...');
+    try {
+      const emailService = new EmailManagementService(dbPool, {
+        user: process.env.IMAP_USER || '',
+        password: process.env.IMAP_PASSWORD || '',
+        host: process.env.IMAP_HOST || '',
+        port: parseInt(process.env.IMAP_PORT || '993'),
+        tls: true,
+      });
+
+      const savedEmails = await emailService.fetchAndSaveUnreadEmails();
+      console.log(`✅ [Scheduled] Email fetch completed: ${savedEmails.length} new emails\n`);
+    } catch (error) {
+      console.error('❌ [Scheduled] Email fetch failed:', error);
+    }
+  });
+
+  console.log('✅ Automated email fetching scheduler started');
 });
