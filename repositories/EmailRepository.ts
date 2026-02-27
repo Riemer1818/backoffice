@@ -176,6 +176,9 @@ export class EmailRepository {
     const params: any[] = [];
     let paramIndex = 1;
 
+    // Never show dismissed emails
+    conditions.push('(dismissed IS NULL OR dismissed = FALSE)');
+
     if (filters.is_read !== undefined) {
       conditions.push(`is_read = $${paramIndex++}`);
       params.push(filters.is_read);

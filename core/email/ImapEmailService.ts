@@ -97,72 +97,110 @@ export class ImapEmailService extends EventEmitter {
   }
 
   /**
-   * Fetch unread emails
+   * Fetch unread emails from a specific mailbox
    */
-  async fetchUnreadEmails(): Promise<Email[]> {
-    const imap = await this.connect();
-    await this.openBox();
-
+  private async fetchUnreadFromBox(boxName: string): Promise<Email[]> {
     return new Promise((resolve, reject) => {
       if (!this.imap) {
         reject(new Error('IMAP not connected'));
         return;
       }
 
-      // Search for unread emails
-      this.imap.search(['UNSEEN'], (err, uids) => {
+      this.imap.openBox(boxName, false, (err) => {
         if (err) {
-          this.disconnect();
-          reject(err);
-          return;
-        }
-
-        if (!uids || uids.length === 0) {
-          this.disconnect();
+          // Box doesn't exist, return empty array
+          console.log(`Mailbox ${boxName} not found, skipping`);
           resolve([]);
           return;
         }
 
-        const emails: Email[] = [];
-        const parsePromises: Promise<void>[] = [];
+        // Search for ALL emails (script will skip ones that already exist)
+        this.imap!.search(['ALL'], (err, uids) => {
+          if (err) {
+            reject(err);
+            return;
+          }
 
-        const fetch = this.imap!.fetch(uids, {
-          bodies: '',
-          markSeen: false, // Don't auto-mark as read
-        });
+          if (!uids || uids.length === 0) {
+            resolve([]);
+            return;
+          }
 
-        fetch.on('message', (msg: any, seqno: number) => {
-          msg.on('body', (stream: any) => {
-            const parsePromise = new Promise<void>((resolveMsg) => {
-              simpleParser(stream, async (err: any, parsed: any) => {
-                if (err) {
-                  console.error('Error parsing email:', err);
-                  resolveMsg();
-                  return;
-                }
+          const emails: Email[] = [];
+          const parsePromises: Promise<void>[] = [];
 
-                // Unread emails are always isRead: false
-                emails.push(this.parsedMailToEmail(parsed, String(seqno), false));
-                resolveMsg();
-              });
-            });
-            parsePromises.push(parsePromise);
+          const fetch = this.imap!.fetch(uids, {
+            bodies: '',
+            markSeen: false, // Don't auto-mark as read
+            struct: true,
           });
-        });
 
-        fetch.once('error', (err) => {
-          this.disconnect();
-          reject(err);
-        });
+          fetch.on('message', (msg: any, seqno: number) => {
+            let actualUid: number | null = null;
 
-        fetch.once('end', async () => {
-          // Wait for all email parsing to complete
-          await Promise.all(parsePromises);
-          this.disconnect();
-          resolve(emails);
+            // Get the actual UID from attributes
+            msg.once('attributes', (attrs: any) => {
+              actualUid = attrs.uid;
+            });
+
+            msg.once('body', (stream: any) => {
+              const parsePromise = new Promise<void>((resolveMsg) => {
+                simpleParser(stream, async (err: any, parsed: any) => {
+                  if (err) {
+                    console.error('Error parsing email:', err);
+                    resolveMsg();
+                    return;
+                  }
+
+                  // Use actual UID from IMAP, fallback to seqno (should always have UID)
+                  const uid = actualUid !== null ? String(actualUid) : String(seqno);
+                  emails.push(this.parsedMailToEmail(parsed, uid, false));
+                  resolveMsg();
+                });
+              });
+              parsePromises.push(parsePromise);
+            });
+          });
+
+          fetch.once('error', (err) => {
+            reject(err);
+          });
+
+          fetch.once('end', async () => {
+            // Wait for all email parsing to complete
+            await Promise.all(parsePromises);
+            resolve(emails);
+          });
         });
       });
     });
+  }
+
+  /**
+   * Fetch unread emails from INBOX, Junk, and Spam folders
+   */
+  async fetchUnreadEmails(): Promise<Email[]> {
+    const imap = await this.connect();
+
+    const allEmails: Email[] = [];
+
+    // Fetch from INBOX
+    const inboxEmails = await this.fetchUnreadFromBox('INBOX');
+    allEmails.push(...inboxEmails);
+    console.log(`Found ${inboxEmails.length} unread emails in INBOX`);
+
+    // Fetch from Junk
+    const junkEmails = await this.fetchUnreadFromBox('Junk');
+    allEmails.push(...junkEmails);
+    console.log(`Found ${junkEmails.length} unread emails in Junk`);
+
+    // Fetch from Spam
+    const spamEmails = await this.fetchUnreadFromBox('Spam');
+    allEmails.push(...spamEmails);
+    console.log(`Found ${spamEmails.length} unread emails in Spam`);
+
+    this.disconnect();
+    return allEmails;
   }
 
   /**

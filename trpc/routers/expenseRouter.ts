@@ -12,28 +12,31 @@ const expenseRouter = router({
       projectId: z.number().optional(),
     }).optional())
     .query(async ({ ctx, input }) => {
-      let query = 'SELECT * FROM incoming_invoices WHERE 1=1';
+      let query = `SELECT ii.*, p.name as project_name
+                   FROM incoming_invoices ii
+                   LEFT JOIN projects p ON ii.project_id = p.id
+                   WHERE 1=1`;
       const params: any[] = [];
 
       // By default, exclude rejected expenses unless explicitly requested
       if (input?.reviewStatus) {
         params.push(input.reviewStatus);
-        query += ` AND review_status = $${params.length}`;
+        query += ` AND ii.review_status = $${params.length}`;
       } else {
-        query += ` AND review_status != 'rejected'`;
+        query += ` AND ii.review_status != 'rejected'`;
       }
 
       if (input?.supplierId) {
         params.push(input.supplierId);
-        query += ` AND supplier_id = $${params.length}`;
+        query += ` AND ii.supplier_id = $${params.length}`;
       }
 
       if (input?.projectId) {
         params.push(input.projectId);
-        query += ` AND project_id = $${params.length}`;
+        query += ` AND ii.project_id = $${params.length}`;
       }
 
-      query += ' ORDER BY invoice_date DESC';
+      query += ' ORDER BY ii.invoice_date DESC';
 
       const result = await ctx.db.query(query, params);
       return result.rows;

@@ -54,10 +54,13 @@ export class EmailManagementService {
 
     for (const imapEmail of imapEmails) {
       try {
-        // Check if email already exists
-        const exists = await this.emailRepository.existsByUid(imapEmail.id);
-        if (exists) {
-          console.log(`⏭️  Email ${imapEmail.id} already exists, skipping`);
+        // Check by subject + from + date (most reliable since UIDs can be reused)
+        const result = await this.pool.query(
+          `SELECT id FROM emails WHERE subject = $1 AND from_address = $2 AND email_date = $3 LIMIT 1`,
+          [imapEmail.subject, imapEmail.from, imapEmail.date]
+        );
+        if (result.rows.length > 0) {
+          console.log(`⏭️  Email "${imapEmail.subject.substring(0, 50)}" already exists, skipping`);
           continue;
         }
 
@@ -272,7 +275,12 @@ export class EmailManagementService {
    * Delete email
    */
   async deleteEmail(emailId: number): Promise<boolean> {
-    return this.emailRepository.delete(emailId);
+    // Instead of deleting, mark as dismissed so it doesn't get re-fetched
+    const result = await this.pool.query(
+      'UPDATE emails SET dismissed = TRUE WHERE id = $1',
+      [emailId]
+    );
+    return result.rowCount !== null && result.rowCount > 0;
   }
 
   /**
@@ -320,14 +328,16 @@ export class EmailManagementService {
       return null;
     }
 
-    // Auto-process invoices and receipts
+    // Auto-process invoices and receipts, but keep them pending for manual review
     if (label === 'incoming_invoice' || label === 'receipt') {
       try {
         console.log(`Processing email ${emailId} as ${label}...`);
         await this.processEmailAsInvoice(updatedEmail);
 
-        // Mark as processed
-        await this.emailRepository.updateProcessingStatus(emailId, 'completed');
+        // Keep as 'pending' so they show up in Expenses Pending Review for manual confirmation
+        // They won't show in the Emails tab anymore (they have a label now)
+        // But they will show in the Expenses tab (processing_status = 'pending')
+        await this.emailRepository.updateProcessingStatus(emailId, 'pending');
       } catch (error) {
         console.error(`Failed to process email ${emailId} as invoice:`, error);
         await this.emailRepository.updateProcessingStatus(
